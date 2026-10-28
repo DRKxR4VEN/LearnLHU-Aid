@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Tài khoản Learn LHU</title>
+  <link rel="stylesheet" href="accounts.css">
+  <script src="accounts.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div class="brand" aria-hidden="true">LH</div>
+      <div class="heading">
+        <p class="eyebrow">LearnLHU Aid</p>
+        <h1>Tài khoản Learn LHU</h1>
+        <p class="subtitle">Lưu nhiều tài khoản, chuyển đăng nhập khi cần.</p>
+      </div>
+      <a class="site-link" href="https://learn.lhu.edu.vn/" target="_blank" rel="noopener noreferrer">Mở Learn LHU <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <aside class="storage-warning" aria-label="Lưu ý về mật khẩu">
+      <strong>Lưu trên máy này</strong>
+      <p>Mật khẩu chỉ lưu trong hồ sơ Chrome trên máy này. Không nên dùng trên máy chung.</p>
+    </aside>
+
+    <section class="card" aria-labelledby="saved-title">
+      <div class="section-header">
+        <h2 id="saved-title">Tài khoản đã lưu <span id="account-count" class="count">0</span></h2>
+        <button id="refresh" class="button button-quiet" type="button">Tải lại</button>
+      </div>
+      <div id="account-list" class="account-list" aria-busy="true">
+        <p class="empty">Đang tải danh sách tài khoản…</p>
+      </div>
+      <div class="auto-login">
+        <div>
+          <label for="auto-enabled">Tự động đăng nhập</label>
+          <p id="auto-help">Chọn tài khoản bằng một lần đăng nhập thành công để bật.</p>
+        </div>
+        <label class="toggle">
+          <input id="auto-enabled" type="checkbox" aria-describedby="auto-help" disabled>
+          <span class="toggle-track" aria-hidden="true"></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="card add-card" aria-labelledby="add-title">
+      <h2 id="add-title">Thêm tài khoản</h2>
+      <p class="section-description">Xác minh bằng đăng nhập thật trước khi lưu tài khoản.</p>
+      <form id="add-form" novalidate>
+        <fieldset id="add-fields" disabled>
+          <div class="form-grid">
+            <div class="field">
+              <label for="username">MSSV</label>
+              <input id="username" name="username" type="text" inputmode="numeric" autocomplete="username" minlength="6" maxlength="20" pattern="[0-9]{6,20}" required aria-describedby="username-help">
+              <span id="username-help" class="field-help">Từ 6 đến 20 chữ số.</span>
+            </div>
+            <div class="field">
+              <label for="password">Mật khẩu</label>
+              <input id="password" name="password" type="password" autocomplete="off" required>
+            </div>
+            <button class="button button-primary add-button" type="submit">Thêm</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+
+    <div id="operation-status" class="operation-status" role="status" aria-live="polite" aria-atomic="true">Đang kết nối với tiện ích…</div>
+    <p id="preference-status" class="preference-status" role="status" aria-live="polite" hidden></p>
+    <noscript><p class="storage-warning">Trang cần JavaScript để quản lý tài khoản. Hãy mở trang từ tiện ích LearnLHU Aid trong Chrome.</p></noscript>
+    <footer>Tài khoản đang chọn chỉ được thay đổi sau khi đăng nhập thành công.</footer>
+  </main>
+</body>
+</html>

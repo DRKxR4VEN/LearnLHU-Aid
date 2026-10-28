@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#20304a"/>
+  <g fill="none" stroke="#9aabc4" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="277" y="90" width="86" height="68" rx="9"/>
+    <circle cx="300" cy="111" r="6"/>
+    <path d="m282 147 23-22 17 16 15-14 20 20M274 83l94 82"/>
+  </g>
+  <text x="320" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="27" font-weight="600" fill="#e4ecf9">Chưa có ảnh bìa</text>
+  <text x="320" y="249" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" fill="#9aabc4">Môn học chưa cung cấp ảnh</text>
+</svg>

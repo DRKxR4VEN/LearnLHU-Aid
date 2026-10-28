@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "LHU Aid",
+  "version": "3.0.0",
+  "description": "Trợ lý học tập cho learn.lhu.edu.vn: nền tối toàn trang, panel hạn nộp, lưới môn học có tìm kiếm và tải trọn bộ tệp môn học.",
+  "permissions": [
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://learn.lhu.edu.vn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://learn.lhu.edu.vn/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/page-theme.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://learn.lhu.edu.vn/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/session.js",
+        "content/scrape.js",
+        "content/course-sort.js",
+        "content/panel.js",
+        "content/dashboard.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "accounts.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/course-no-cover.svg"],
+      "matches": ["https://learn.lhu.edu.vn/*"]
+    }
+  ],
+  "action": {
+    "default_title": "LHU Aid",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
