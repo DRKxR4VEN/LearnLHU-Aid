@@ -6,20 +6,22 @@
   const STYLE_ID = 'lhu-page-theme';
   const INVERT_ATTR = 'data-lhu-invert';
   const CHECKED_ATTR = 'data-lhu-imgchecked';
+  let dark = false;
 
   function apply(theme) {
     const root = document.documentElement;
     if (!root) return;
-    if (theme === 'dark') root.setAttribute('data-lhu-theme', 'dark');
+    dark = theme === 'dark';
+    if (dark) root.setAttribute('data-lhu-theme', 'dark');
     else root.removeAttribute('data-lhu-theme');
+    if (dark && document.body) scanImages();
   }
 
   // Moodle stores hand-written notes as white screenshots, which glare out of
   // the dark page. Sample each content image and invert only white documents.
   function processImage(img) {
-    if (!(img instanceof HTMLImageElement)) return;
+    if (!dark || !(img instanceof HTMLImageElement)) return;
     if (img.hasAttribute(CHECKED_ATTR)) return;
-    if (img.closest('#lhu-aid-root')) return;
     if (!img.closest('#region-main')) return;
     if (img.classList.contains('icon') || img.classList.contains('userpicture') || img.classList.contains('fp-thumbnail')) return;
     if (!img.complete) {
@@ -57,9 +59,9 @@
     }
   }
 
-  function scanImages(root) {
-    const scope = root && root.querySelectorAll ? root : document;
-    scope.querySelectorAll('img').forEach(processImage);
+  function scanImages() {
+    const scope = document.querySelector('#region-main') || document.body;
+    if (scope) scope.querySelectorAll('img').forEach(processImage);
   }
 
   function watchImages() {
@@ -67,9 +69,9 @@
     let timer = 0;
     const schedule = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => scanImages(document), 250);
+      timer = setTimeout(() => { if (dark) scanImages(); }, 250);
     };
-    scanImages(document);
+    if (dark) scanImages();
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     window.addEventListener('load', schedule);
   }

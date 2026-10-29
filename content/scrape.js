@@ -8,19 +8,16 @@
   const userKey = LHU.sessionUser().userId || 'guest';
   const K = {
     courses: `lhu.v2.courses.${userKey}`,
-    acts: `lhu.v2.activities.${userKey}`,
     categories: `lhu.v2.categories.${userKey}`,
     cat: `lhu.v2.category.${userKey}`,
     deadlines: `lhu.v2.deadlines.${userKey}`
   };
   const TTL = {
     courses: 6 * 3600e3,
-    acts: 12 * 3600e3,
     categories: 6 * 3600e3,
     cat: 3600e3,
     deadlines: 5 * 60e3
   };
-  const POOL = 4;
   const PAST_DAYS = 90;
 
   const memory = new Map();
@@ -47,28 +44,25 @@
     }
   }
 
-  function norm(s) {
-    return String(s || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/Đ/g, 'D')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
+  let decoder;
   function decodeEntities(s) {
     if (!/[&<>]/.test(s)) return s;
-    const el = document.createElement('textarea');
-    el.innerHTML = s;
-    return el.value;
+    if (!decoder) decoder = document.createElement('textarea');
+    decoder.innerHTML = s;
+    return decoder.value;
   }
 
+  let sesskeyCache;
   function sesskey() {
-    const html = document.documentElement.innerHTML;
-    const m = html.match(/"sesskey":"([A-Za-z0-9]+)"/) || html.match(/name="sesskey"\s+value="([A-Za-z0-9]+)"/);
-    return m ? m[1] : null;
+    if (sesskeyCache) return sesskeyCache;
+    sesskeyCache = document.querySelector('input[name="sesskey"]')?.value || '';
+    if (!sesskeyCache) {
+      // Serializing the whole DOM is expensive, so only do it once per page.
+      const html = document.documentElement.innerHTML;
+      const m = html.match(/"sesskey":"([A-Za-z0-9]+)"/) || html.match(/name="sesskey"\s+value="([A-Za-z0-9]+)"/);
+      if (m) sesskeyCache = m[1];
+    }
+    return sesskeyCache || null;
   }
 
   async function ajax(methodname, args) {
@@ -103,32 +97,6 @@
     }
   }
 
-  function activityName(li, link) {
-    const inst = li.querySelector('.instancename');
-    if (inst) {
-      const clone = inst.cloneNode(true);
-      clone.querySelectorAll('.accesshide, .sr-only, .visually-hidden').forEach(n => n.remove());
-      const text = clone.textContent.replace(/\s+/g, ' ').trim();
-      if (text) return text;
-    }
-    return (link.textContent || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function parseActivities(doc) {
-    const out = [];
-    for (const li of doc.querySelectorAll('li.activity')) {
-      const link = li.querySelector('.activityinstance a[href]') || li.querySelector('a[href]');
-      if (!link || !link.href) continue;
-      const name = activityName(li, link);
-      if (!name) continue;
-      const type = (li.className.match(/modtype_([a-z0-9_]+)/) || [])[1] || '';
-      const sec = li.closest('li.section')?.querySelector('.sectionname');
-      const section = sec ? sec.textContent.replace(/^topic\s*\d+\s*/i, '').replace(/\s+/g, ' ').trim() : '';
-      out.push({ name, type, url: link.href.split('#')[0], section });
-    }
-    return out;
-  }
-
   function scrapeCourseLinks() {
     const seen = new Map();
     for (const a of document.querySelectorAll('a[href*="/course/view.php?id="]')) {
@@ -142,7 +110,6 @@
         short: (a.dataset?.shortname || '').trim(),
         category: '',
         image: '',
-        progress: null,
         url: `${BASE}/course/view.php?id=${id}`
       });
     }
@@ -175,7 +142,6 @@
           short: (c.shortname || '').trim(),
           category: categoryName(c.coursecategory),
           image: c.courseimage && !/^data:/i.test(c.courseimage) && !isPlaceholderImage(c.courseimage) ? c.courseimage : '',
-          progress: typeof c.progress === 'number' ? Math.round(c.progress) : null,
           url: c.viewurl || `${BASE}/course/view.php?id=${c.id}`
         }));
       } else {
@@ -244,7 +210,6 @@
         short: '',
         category: String(category || '').trim(),
         image: image && !isPlaceholderImage(image) && !/^data:/i.test(image) ? image : '',
-        progress: null,
         url: `${BASE}/course/view.php?id=${id}`
       });
     };
@@ -389,119 +354,7 @@
     return deadlinesInflight;
   }
 
-  async function pool(items, limit, worker) {
-    let cursor = 0;
-    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (cursor < items.length) {
-        const item = items[cursor++];
-        try {
-          await worker(item);
-        } catch (e) {
-          /* keep scanning remaining courses */
-        }
-      }
-    });
-    await Promise.all(runners);
-  }
-
-  async function fetchActivities(courseId) {
-    const doc = await fetchDoc(`${BASE}/course/view.php?id=${courseId}`);
-    if (!doc) return null;
-    return parseActivities(doc);
-  }
-
-  async function courseActivities(courseId, opts = {}) {
-    const acts = (await get(K.acts)) || {};
-    const entry = acts[courseId];
-    if (!opts.force && entry && Date.now() - entry.ts < TTL.acts) return entry.items || [];
-
-    const items = await fetchActivities(courseId);
-    if (!items) return entry?.items || null;
-
-    acts[courseId] = { ts: Date.now(), items };
-    await set(K.acts, acts);
-    return items;
-  }
-
-  async function resolveFile(url) {
-    try {
-      const r = await fetch(url, { method: 'HEAD', redirect: 'follow', credentials: 'same-origin' });
-      if (!r.ok || /\/login\//.test(r.url)) return null;
-      const finalUrl = r.url || url;
-      const urlBase = baseName(finalUrl);
-      const cd = r.headers.get('content-disposition') || '';
-      let name = (cd.match(/filename\*=UTF-8''([^;]+)/i) || [])[1];
-      if (name) name = decodeURIComponent(name.replace(/"/g, ''));
-      else name = (cd.match(/filename="?([^";]+)"?/i) || [])[1];
-      // Header bytes are sometimes decoded as latin1, which mangles Vietnamese names.
-      if (name && /[\u00c2\u00c3\u00e2\ufffd]/.test(name) && urlBase) name = urlBase;
-      if (!name) name = urlBase;
-      if (!name || /\.php$/i.test(name)) return null;
-      return { url: finalUrl, name };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function baseName(url) {
-    try {
-      return decodeURIComponent((new URL(url).pathname.split('/').pop() || '')).trim();
-    } catch (e) {
-      return '';
-    }
-  }
-
-  async function filesForCourse(courseId) {
-    const items = (await courseActivities(courseId)) || [];
-    const files = [];
-    const seen = new Set();
-    const add = (url, name) => {
-      if (!url || seen.has(url)) return;
-      seen.add(url);
-      files.push({ url, name: (name || baseName(url) || 'file').trim() });
-    };
-
-    const targets = items.filter(a => ['resource', 'folder', 'page'].includes(a.type));
-    await pool(targets, 3, async (item) => {
-      if (item.type === 'resource') {
-        const info = await resolveFile(item.url);
-        if (info) add(info.url, info.name);
-        return;
-      }
-      const doc = await fetchDoc(item.url);
-      if (!doc) return;
-      const sel = item.type === 'folder'
-        ? 'a[href*="pluginfile.php"]'
-        : '.box.generalbox a[href*="pluginfile.php"], #page-content a[href*="pluginfile.php"], .resourcecontent a[href*="pluginfile.php"]';
-      for (const link of doc.querySelectorAll(sel)) {
-        if (item.type === 'page' && /\.(png|jpe?g|gif|svg|webp|ico)$/i.test(link.href)) continue;
-        add(link.href, baseName(link.href));
-      }
-    });
-
-    return files;
-  }
-
-  function currentCourseId() {
-    if (!/^\/(course|mod)\//.test(location.pathname)) return null;
-    const input = document.querySelector('input[name="courseid"]');
-    if (input && /^\d+$/.test(input.value) && Number(input.value) > 1) return Number(input.value);
-    const crumb = document.querySelector('.breadcrumb a[href*="/course/view.php?id="]');
-    if (crumb) {
-      const id = (crumb.href.match(/[?&]id=(\d+)/) || [])[1];
-      if (id) return Number(id);
-    }
-    const cls = document.body.className.match(/\bcourse-(\d+)\b/);
-    if (cls && Number(cls[1]) > 1) return Number(cls[1]);
-    return null;
-  }
-
   Object.assign(LHU, {
-    K, TTL,
-    norm, parseActivities,
-    getStorage: get, setStorage: set, sesskey, ajax, fetchDoc,
-    loadCourses, loadCourseCategories, courseCategories, loadCategoryCourses, categoryCourses,
-    loadDeadlines, isDeadlineEvent, parseEvent,
-    courseActivities, filesForCourse, resolveFile, currentCourseId, baseName
+    loadCourses, loadCourseCategories, loadCategoryCourses, loadDeadlines
   });
 })();

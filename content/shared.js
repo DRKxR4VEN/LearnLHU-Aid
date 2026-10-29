@@ -9,10 +9,25 @@
   const FS_STEPS = [0.9, 1, 1.15, 1.3];
   const COL_STEPS = [2, 3, 4, 5];
   const OVERDUE_DAYS = [7, 14, 30, 90];
-  const DEFAULT = { theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14, courseSort: 'off' };
+  const DEFAULT = {
+    theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
+    courseSort: 'off', autoExtend: true, coursePins: []
+  };
 
   const hasStore = () => !!(globalThis.chrome?.storage?.local);
   let cached = null;
+
+  function cleanPins(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const raw of value) {
+      const id = Number(raw);
+      if (!Number.isInteger(id) || id <= 0 || out.includes(id)) continue;
+      out.push(id);
+      if (out.length >= 100) break;
+    }
+    return out;
+  }
 
   function clean(raw) {
     const p = { ...DEFAULT, ...(raw || {}) };
@@ -22,7 +37,22 @@
     p.overdueDays = OVERDUE_DAYS.includes(Number(p.overdueDays)) ? Number(p.overdueDays) : 14;
     p.courseSort = p.courseSort === 'az' ? 'az' : 'off';
     p.pinned = !!p.pinned;
+    p.autoExtend = p.autoExtend !== false;
+    p.coursePins = cleanPins(p.coursePins);
     return p;
+  }
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function norm(s) {
+    return String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   function writeMirror(theme) {
@@ -68,13 +98,20 @@
   async function setPrefs(patch) {
     cached = clean({ ...(await getPrefs()), ...patch });
     writeMirror(cached.theme);
+    let saved = false;
     try {
-      if (hasStore()) await chrome.storage.local.set({ [PREFS_KEY]: cached });
-      else localStorage.setItem(PREFS_KEY, JSON.stringify(cached));
+      if (hasStore()) {
+        await chrome.storage.local.set({ [PREFS_KEY]: cached });
+        saved = true;
+      } else {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(cached));
+      }
     } catch (e) {
       /* storage full or blocked: keep the in-memory value */
     }
-    emit();
+    // chrome.storage.onChanged already notifies this tab, so emitting would
+    // run every listener twice; only fall back to a local event when needed.
+    if (!hasStore() || !saved) emit();
     return { ...cached };
   }
 
@@ -96,6 +133,44 @@
     });
   }
 
+  function bindPrefs(host, paint) {
+    const run = (p) => {
+      applyPrefs(host, p);
+      if (paint) paint(p);
+    };
+    getPrefs().then(run);
+    onPrefs(run);
+  }
+
+  const sheetCache = new Map();
+
+  function cssSheet(text) {
+    let sheet = sheetCache.get(text);
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      sheet.replaceSync(text);
+      sheetCache.set(text, sheet);
+    }
+    return sheet;
+  }
+
+  // Shadow hosts adopt constructable stylesheets instead of re-parsing a
+  // <style> block per host; identical CSS text is shared across every host.
+  function mountShadow(id, styles, html, tag = 'div') {
+    const host = document.createElement(tag);
+    if (id) host.id = id;
+    const sr = host.attachShadow({ mode: 'open' });
+    let adopted = false;
+    try {
+      sr.adoptedStyleSheets = styles.map(cssSheet);
+      adopted = true;
+    } catch (e) {
+      /* no constructable stylesheets: keep the <style> fallback */
+    }
+    sr.innerHTML = (adopted ? '' : `<style>${styles.join('\n')}</style>`) + html;
+    return { host, sr };
+  }
+
   function courseNameKey(value) {
     return String(value || '')
       .normalize('NFC')
@@ -110,38 +185,34 @@
   const THEME_CSS = `
     :host {
       --bg: #ffffff;
-      --bg2: #f7f9fd;
-      --bg3: #edf2fa;
-      --fg: #17233a;
-      --fg2: #66738c;
-      --line: #e5ebf5;
-      --line2: #ced9ea;
+      --bg2: #f6f8fc;
+      --bg3: #eef2f8;
+      --fg: #1b2436;
+      --fg2: #64708a;
+      --line: #e4e9f1;
+      --line2: #ccd5e3;
       --brand: #17395f;
       --accent: #2f6feb;
       --accent-bg: #eaf1fe;
-      --gold: #f2c14e;
       --danger: #d64545;
-      --ok: #23915c;
-      --tile: linear-gradient(150deg, #1b3c6b, #3b46c9);
-      --shadow: 0 20px 55px rgba(15, 44, 77, .18);
-      --shadow-sm: 0 1px 2px rgba(15, 44, 77, .07);
+      --ok: #1f8a5b;
+      --shadow: 0 18px 48px rgba(15, 44, 77, .16);
+      --shadow-sm: 0 1px 2px rgba(15, 44, 77, .06);
     }
     :host([data-theme="dark"]) {
-      --bg: #141d2e;
-      --bg2: #182339;
-      --bg3: #20304a;
-      --fg: #e9effb;
+      --bg: #151d2b;
+      --bg2: #1a2434;
+      --bg3: #223046;
+      --fg: #e8eef9;
       --fg2: #9aa9c4;
-      --line: #26344f;
-      --line2: #37496a;
-      --brand: #d7e4ff;
+      --line: #27344b;
+      --line2: #374a66;
+      --brand: #dbe7ff;
       --accent: #7aa2ff;
-      --accent-bg: #1c2c4e;
-      --gold: #f4cb62;
+      --accent-bg: #1d2c4a;
       --danger: #ff8585;
       --ok: #5dd39e;
-      --tile: linear-gradient(150deg, #1b3c6b, #3b46c9);
-      --shadow: 0 20px 55px rgba(0, 0, 0, .5);
+      --shadow: 0 18px 48px rgba(0, 0, 0, .5);
       --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
     }
   `;
@@ -963,14 +1034,12 @@
     moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.4 14.4A8.6 8.6 0 0 1 9.6 3.6a8.8 8.8 0 1 0 10.8 10.8z"/></svg>`,
     refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.4 5.7"/><path d="M20 4v7h-7"/></svg>`,
     pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v4.5"/><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg>`,
-    download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11.5"/><path d="M7.6 10.4L12 14.8l4.4-4.4"/><path d="M4 20.5h16"/></svg>`,
+    deadline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.6"/><path d="M8 3v4M16 3v4M3.5 10h17"/><path d="M8.6 14.7l2.2 2.2 4.5-4.5"/></svg>`,
+    clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></svg>`,
     close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
     assign: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M9 10.5h6M9 14.2h4"/></svg>`,
     quiz: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.8"/><path d="M9.7 9.4a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.7"/><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none"/></svg>`,
-    file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>`,
-    calendar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.4"/><path d="M8 3v4M16 3v4M3.5 10.5h17"/></svg>`,
-    dot: `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="3.2"/></svg>`,
-    brand: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l8.8 4.1-8.8 4.1-8.8-4.1z" fill="#f2c14e"/><path d="M18.6 9.4v4.1" stroke="#e0a72c" stroke-width="1.5" stroke-linecap="round"/><circle cx="18.6" cy="14.7" r="1.15" fill="#e0a72c"/><rect x="6.4" y="16" width="11.2" height="3.1" rx="1.2" fill="#f8faff"/></svg>`
+    file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>`
   };
 
   function gridIcon(n) {
@@ -993,7 +1062,8 @@
 
   Object.assign(LHU, {
     PREFS_KEY, THEME_MIRROR_KEY, FS_STEPS, COL_STEPS, OVERDUE_DAYS,
-    getPrefs, setPrefs, applyPrefs, onPrefs, readThemeMirror,
+    getPrefs, setPrefs, applyPrefs, onPrefs, bindPrefs, readThemeMirror,
+    esc, norm, mountShadow,
     compareCourseNames, THEME_CSS, PAGE_CSS, ICONS, gridIcon
   });
 })();

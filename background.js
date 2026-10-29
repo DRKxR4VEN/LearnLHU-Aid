@@ -2,71 +2,9 @@
 
 const SITE = 'https://learn.lhu.edu.vn/';
 
-function sanitize(name) {
-  return String(name || 'file')
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-    .replace(/\s+/g, ' ')
-    .replace(/^[.\s]+|[.\s]+$/g, '')
-    .slice(0, 120) || 'file';
-}
-
-function extFromUrl(url) {
-  try {
-    const file = new URL(url).pathname.split('/').pop() || '';
-    const m = file.match(/\.([a-z0-9]{2,5})$/i);
-    return m ? `.${m[1].toLowerCase()}` : '';
-  } catch (e) {
-    return '';
-  }
-}
-
-function targetPath(folder, name, url) {
-  let base = sanitize(name);
-  if (!/\.[a-z0-9]{2,5}$/i.test(base)) base += extFromUrl(url);
-  return `LHU/${sanitize(folder || 'Khac')}/${base}`;
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-function downloadOne(file, folder) {
-  return new Promise(resolve => {
-    chrome.downloads.download(
-      {
-        url: file.url,
-        filename: targetPath(folder, file.name, file.url),
-        conflictAction: 'uniquify',
-        saveAs: false
-      },
-      () => {
-        resolve(!chrome.runtime.lastError);
-      }
-    );
-  });
-}
-
 function notifyTab(tabId, payload) {
   if (!tabId) return;
   chrome.tabs.sendMessage(tabId, payload).catch(() => {});
-}
-
-let chain = Promise.resolve();
-
-function enqueue(files, folder, tabId) {
-  chain = chain.then(async () => {
-    const total = files.length;
-    let done = 0;
-    let failed = 0;
-    for (const file of files) {
-      const ok = await downloadOne(file, folder);
-      if (!ok) failed++;
-      done++;
-      notifyTab(tabId, { type: 'lhu:dl-progress', done, total, failed });
-      await sleep(220);
-    }
-  }).catch(() => {});
-  return chain;
 }
 
 const AUTH_OP = 'lhu.auth.operation';
@@ -120,6 +58,18 @@ function accountsChanged() {
 async function sessionChanged(exceptId) {
   const tabs = await chrome.tabs.query({ url: `${SITE}*` });
   for (const tab of tabs) if (tab.id !== exceptId) notifyTab(tab.id, { type: 'lhu:session-changed' });
+}
+
+// Scrape caches are keyed per student id, so a plain key list would never
+// match them; drop every cache key by prefix instead.
+const CACHE_KEY = /^lhu\.v2\.(?:courses|categories|category|deadlines)\./;
+
+async function clearScrapeCache() {
+  const keys = chrome.storage.local.getKeys
+    ? await chrome.storage.local.getKeys()
+    : Object.keys(await chrome.storage.local.get(null));
+  const stale = keys.filter(key => CACHE_KEY.test(key));
+  if (stale.length) await chrome.storage.local.remove(stale);
 }
 
 async function authOperation() {
@@ -192,7 +142,7 @@ async function authMessage(message, sender) {
       state.selected = op.username;
       await writeAccounts(state);
       await chrome.storage.session.remove(AUTH_FAILED);
-      await chrome.storage.local.remove(['lhu.v2.courses', 'lhu.v2.activities', 'lhu.v2.categories', 'lhu.v2.category', 'lhu.v2.deadlines']);
+      await clearScrapeCache();
       text = `Đăng nhập thành công: ${account.name} — ${account.username} · ${account.className ? `Lớp ${account.className}` : 'Hồ sơ chưa cung cấp lớp'}.`;
     } else {
       await chrome.storage.session.set({ [AUTH_FAILED]: op.username });
@@ -282,16 +232,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     authQueue = response;
     response.then(sendResponse, () => sendResponse({ ok: false, message: 'Không truy cập được bộ nhớ tài khoản hoặc tab Learn LHU. Hãy thử lại.' }));
     return true;
-  }
-
-  if (message.type === 'lhu:download') {
-    const files = Array.isArray(message.files) ? message.files.filter(f => f && f.url) : [];
-    if (!files.length) {
-      sendResponse({ ok: false, count: 0 });
-      return;
-    }
-    enqueue(files, message.folder, sender.tab?.id);
-    sendResponse({ ok: true, count: files.length });
   }
 });
 

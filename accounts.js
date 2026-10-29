@@ -123,16 +123,19 @@
     }
   }
 
+  function scrub(payload) {
+    if (!Object.prototype.hasOwnProperty.call(payload, 'password')) return;
+    password.value = '';
+    delete payload.password;
+  }
+
   async function request(payload) {
     let delivery;
     try {
       if (!globalThis.chrome?.runtime?.sendMessage) throw new Error('Unavailable');
       delivery = chrome.runtime.sendMessage(payload);
     } finally {
-      if (Object.prototype.hasOwnProperty.call(payload, 'password')) {
-        password.value = '';
-        delete payload.password;
-      }
+      scrub(payload);
     }
     const response = await delivery;
     if (!response || typeof response.ok !== 'boolean') throw new Error('Invalid response');
@@ -204,10 +207,7 @@
 
   async function mutate(payload, progress, accepted) {
     if (blocked()) {
-      if (Object.prototype.hasOwnProperty.call(payload, 'password')) {
-        password.value = '';
-        delete payload.password;
-      }
+      scrub(payload);
       return;
     }
     busy = true;

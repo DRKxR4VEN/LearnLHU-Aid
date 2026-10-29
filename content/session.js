@@ -11,6 +11,30 @@
   let noticeHost;
   let reminder;
 
+  const NOTICE_CSS = `
+    :host { all:initial; } * { box-sizing:border-box; }
+    .box { position:fixed; top:75px; right:18px; width:340px; max-width:calc(100vw - 36px); z-index:2147483100; padding:14px 16px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:10px; background:var(--bg); color:var(--fg); box-shadow:var(--shadow); font:13px/1.5 -apple-system,"Segoe UI",sans-serif; }
+    .message { margin-right:20px; overflow-wrap:anywhere; }
+    button { border:0; border-radius:6px; color:var(--accent); background:var(--accent-bg); padding:5px 9px; font:inherit; cursor:pointer; margin-top:9px; }
+    .close { position:absolute; top:4px; right:9px; background:transparent; color:var(--fg2); font-size:18px; padding:0 4px; }
+  `;
+
+  const CONTROLS_CSS = `
+    :host { all:initial; display:inline-flex; margin-right:10px; }
+    .tools { display:flex; align-items:center; gap:5px; font:12px -apple-system,"Segoe UI",sans-serif; }
+    button { height:32px; border:1px solid var(--line2); border-radius:7px; padding:0 9px; background:var(--bg); color:var(--fg); font:inherit; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+    button:hover { color:var(--accent); border-color:var(--accent); }
+    svg { width:17px; height:17px; }
+  `;
+
+  const REMINDER_CSS = `
+    :host { all:initial; display:block; margin:12px 0 20px; }
+    .reminder { padding:14px 18px; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:10px; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI",sans-serif; }
+    .small { margin:0 0 5px; color:var(--fg2); font-size:12px; font-weight:600; letter-spacing:.02em; }
+    h2 { margin:0; color:var(--brand); font-size:clamp(17px,2vw,23px); font-weight:700; line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    button { margin-top:8px; border:0; border-radius:6px; background:var(--accent-bg); color:var(--accent); padding:5px 9px; cursor:pointer; }
+  `;
+
   function sessionUser(doc = document) {
     if (doc === document && LHU.sessionInvalid) return { loggedIn: false, userId: '', name: '' };
     const menu = doc.querySelector('.usermenu');
@@ -62,16 +86,10 @@
 
   function showNotice(message, reload = false) {
     if (!noticeHost) {
-      noticeHost = document.createElement('div');
-      noticeHost.id = 'lhu-account-notice';
-      const sr = noticeHost.attachShadow({ mode: 'open' });
-      sr.innerHTML = `<style>${LHU.THEME_CSS}
-        :host { all:initial; } * { box-sizing:border-box; }
-        .box { position:fixed; top:75px; right:18px; width:340px; max-width:calc(100vw - 36px); z-index:2147483100; padding:14px 16px; border:1px solid var(--line2); border-left:4px solid var(--gold); border-radius:12px; background:var(--bg); color:var(--fg); box-shadow:var(--shadow); font:13px/1.5 -apple-system,"Segoe UI",sans-serif; }
-        .message { margin-right:20px; overflow-wrap:anywhere; }
-        button { border:0; border-radius:6px; color:var(--accent); background:var(--accent-bg); padding:5px 9px; font:inherit; cursor:pointer; margin-top:9px; }
-        .close { position:absolute; top:4px; right:9px; background:transparent; color:var(--fg2); font-size:18px; padding:0 4px; }
-      </style><div class="box" role="alert"><button class="close" aria-label="Đóng">×</button><div class="message"></div><button class="manage">Tài khoản</button><button class="reload" hidden>Tải lại trang</button></div>`;
+      const built = LHU.mountShadow('lhu-account-notice', [LHU.THEME_CSS, NOTICE_CSS],
+        '<div class="box" role="alert"><button class="close" aria-label="Đóng">×</button><div class="message"></div><button class="manage">Tài khoản</button><button class="reload" hidden>Tải lại trang</button></div>');
+      noticeHost = built.host;
+      const sr = built.sr;
       sr.querySelector('.close').onclick = () => { noticeHost.remove(); noticeHost = null; };
       sr.querySelector('.manage').onclick = openAccounts;
       sr.querySelector('.reload').onclick = () => location.reload();
@@ -163,55 +181,40 @@
   function mountControls() {
     const menu = document.querySelector('.c-user-menu') || document.querySelector('.usermenu');
     if (!menu) return;
-    const host = document.createElement('div');
-    host.id = 'lhu-account-controls';
-    const sr = host.attachShadow({ mode: 'open' });
     const home = location.pathname === '/' || /^\/login\//.test(location.pathname);
-    sr.innerHTML = `<style>${LHU.THEME_CSS}
-      :host { all:initial; display:inline-flex; margin-right:10px; }
-      .tools { display:flex; align-items:center; gap:5px; font:12px -apple-system,"Segoe UI",sans-serif; }
-      button { height:32px; border:1px solid var(--line2); border-radius:8px; padding:0 9px; background:var(--bg2); color:var(--fg); font:inherit; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-      button:hover { color:var(--accent); border-color:var(--accent); }
-      svg { width:17px; height:17px; }
-    </style><div class="tools">${home ? '<button class="theme" aria-label="Đổi nền sáng/tối"></button>' : ''}<button class="accounts">Tài khoản</button></div>`;
+    const { host, sr } = LHU.mountShadow('lhu-account-controls', [LHU.THEME_CSS, CONTROLS_CSS],
+      `<div class="tools">${home ? '<button class="theme" aria-label="Đổi nền sáng/tối"></button>' : ''}<button class="accounts">Tài khoản</button></div>`);
     menu.before(host);
     sr.querySelector('.accounts').onclick = openAccounts;
     const theme = sr.querySelector('.theme');
-    const paint = p => {
-      LHU.applyPrefs(host, p);
-      if (theme) {
-        theme.innerHTML = p.theme === 'dark' ? LHU.ICONS.sun : LHU.ICONS.moon;
-        theme.title = p.theme === 'dark' ? 'Chuyển nền sáng' : 'Chuyển nền tối';
-        theme.setAttribute('aria-label', theme.title);
-      }
+    if (!theme) {
+      LHU.bindPrefs(host);
+      return;
+    }
+    const paint = (p) => {
+      theme.innerHTML = p.theme === 'dark' ? LHU.ICONS.sun : LHU.ICONS.moon;
+      theme.title = p.theme === 'dark' ? 'Chuyển nền sáng' : 'Chuyển nền tối';
+      theme.setAttribute('aria-label', theme.title);
     };
-    if (theme) theme.onclick = async () => {
+    theme.onclick = async () => {
       const p = await LHU.getPrefs();
       paint(await LHU.setPrefs({ theme: p.theme === 'dark' ? 'light' : 'dark' }));
     };
-    LHU.getPrefs().then(paint);
-    LHU.onPrefs(paint);
+    LHU.bindPrefs(host, paint);
   }
 
   function mountReminder() {
     if (!/^\/my(\/|$)/i.test(location.pathname) || !sessionUser().loggedIn) return;
     const header = document.querySelector('#page-header');
     if (!header) return;
-    reminder = document.createElement('section');
-    reminder.id = 'lhu-session-reminder';
-    const sr = reminder.attachShadow({ mode: 'open' });
-    sr.innerHTML = `<style>${LHU.THEME_CSS}
-      :host { all:initial; display:block; margin:12px 0 20px; }
-      .reminder { padding:14px 20px; border:1px solid var(--line2); border-left:5px solid var(--gold); border-radius:12px; background:var(--bg2); color:var(--fg); font-family:-apple-system,"Segoe UI",sans-serif; }
-      .small { margin:0 0 5px; color:var(--fg2); font-size:12px; font-weight:600; letter-spacing:.03em; }
-      h2 { margin:0; color:var(--brand); font-size:clamp(17px,2vw,24px); font-weight:750; line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      button { margin-top:8px; border:0; border-radius:6px; background:var(--accent-bg); color:var(--accent); padding:5px 9px; cursor:pointer; }
-    </style><div class="reminder"><p class="small">Đăng trong phiên đăng nhập của</p><h2></h2><button hidden>Tải lại trang</button></div>`;
+    const built = LHU.mountShadow('lhu-session-reminder', [LHU.THEME_CSS, REMINDER_CSS],
+      '<div class="reminder"><p class="small">Đăng trong phiên đăng nhập của</p><h2></h2><button hidden>Tải lại trang</button></div>', 'section');
+    reminder = built.host;
+    const sr = built.sr;
     sr.querySelector('h2').textContent = `${sessionUser().name} — Đang đọc MSSV…`;
     sr.querySelector('button').onclick = () => location.reload();
     header.after(reminder);
-    LHU.getPrefs().then(p => LHU.applyPrefs(reminder, p));
-    LHU.onPrefs(p => LHU.applyPrefs(reminder, p));
+    LHU.bindPrefs(reminder);
     getIdentity().then(identity => {
       if (LHU.sessionInvalid) return;
       const heading = sr.querySelector('h2');
@@ -224,7 +227,7 @@
     });
   }
 
-  Object.assign(LHU, { sessionUser, isLoggedIn: () => sessionUser().loggedIn, getIdentity, readIdentity, openAccounts });
+  Object.assign(LHU, { sessionUser, isLoggedIn: () => sessionUser().loggedIn });
   mountControls();
   mountReminder();
   LHU.onPrefs(p => { if (noticeHost) LHU.applyPrefs(noticeHost, p); });

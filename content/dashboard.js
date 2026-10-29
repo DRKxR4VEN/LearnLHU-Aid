@@ -12,10 +12,12 @@
   const DISCOVER_TITLE = 'Khám phá môn học';
   const NO_COVER = chrome.runtime.getURL('icons/course-no-cover.svg');
 
-  const prefs = { theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14, courseSort: 'off' };
+  const prefs = {
+    theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
+    courseSort: 'off', autoExtend: true, coursePins: []
+  };
   let recentIds = [];
   let themeBtn = null;
-  let toastEl = null;
   let discRequest = 0;
 
   const mine = { id: 'mine', items: [], query: '', expanded: false, loading: true, error: false };
@@ -24,37 +26,28 @@
     query: '', expanded: false, categoriesLoading: true, loading: false, error: false
   };
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const norm = (s) => LHU.norm(s);
-  const msg = (m) => {
-    try {
-      const p = globalThis.chrome?.runtime?.sendMessage?.(m);
-      return p ? Promise.resolve(p).catch(() => null) : Promise.resolve(null);
-    } catch (e) {
-      return Promise.resolve(null);
-    }
-  };
+  const esc = LHU.esc;
+  const norm = LHU.norm;
 
   const CSS = `
-    ${LHU.THEME_CSS}
     :host { all: initial; display: block; margin-top: .95rem; }
     * { box-sizing: border-box; }
     .wrap {
       font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: calc(14.5px * var(--lhu-fs, 1)); line-height: 1.35; color: var(--fg);
+      font-size: calc(14.5px * var(--lhu-fs, 1)); line-height: 1.4; color: var(--fg);
     }
     button, input, select { font-family: inherit; }
-    .tools { display: flex; align-items: center; gap: .5em; flex-wrap: wrap; }
+    .tools { display: flex; align-items: center; gap: .45em; flex-wrap: wrap; }
     .pick {
       flex: 1 1 18em; min-width: 12em; height: 2.4em; padding: 0 .6em;
-      border: 1px solid var(--line2); border-radius: .6em; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--line2); border-radius: .55em; background: var(--bg); color: var(--fg);
       font-size: .88em; outline: 0;
     }
     .pick:focus { border-color: var(--accent); }
     .pick option { background: var(--bg); color: var(--fg); }
     .search {
       flex: 1 1 13em; min-width: 9em; display: flex; align-items: center; gap: .45em;
-      height: 2.4em; padding: 0 .7em; border: 1px solid var(--line2); border-radius: .6em; background: var(--bg);
+      height: 2.4em; padding: 0 .7em; border: 1px solid var(--line2); border-radius: .55em; background: var(--bg);
     }
     .search:focus-within { border-color: var(--accent); }
     .search svg { width: 1.05em; height: 1.05em; color: var(--fg2); flex: none; }
@@ -67,13 +60,13 @@
     .clr:hover { color: var(--fg); background: var(--bg3); }
     .ctl {
       height: 2.4em; min-width: 2.4em; padding: 0 .55em; display: inline-flex; align-items: center; justify-content: center;
-      border: 1px solid var(--line2); border-radius: .6em; background: var(--bg); color: var(--fg); cursor: pointer; font-size: 1em;
+      border: 1px solid var(--line2); border-radius: .55em; background: var(--bg); color: var(--fg); cursor: pointer; font-size: 1em;
     }
     .ctl:hover { border-color: var(--accent); color: var(--accent); }
     .ctl svg { width: 1.1em; height: 1.1em; }
-    .ctl.sort { font-size: .78em; font-weight: 800; letter-spacing: .02em; padding: 0 .6em; }
-    .ctl.sort.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
-    .cols { display: flex; align-items: center; gap: .1em; border: 1px solid var(--line2); border-radius: .6em; padding: .15em .2em; background: var(--bg); }
+    .ctl.sort { font-size: .78em; font-weight: 700; letter-spacing: .02em; padding: 0 .6em; }
+    .ctl.sort.on { background: var(--accent-bg); border-color: transparent; color: var(--accent); }
+    .cols { display: flex; align-items: center; gap: .1em; border: 1px solid var(--line2); border-radius: .55em; padding: .15em; background: var(--bg); }
     .cols .ctl { border: 0; min-width: 2em; height: 1.95em; padding: 0 .2em; color: var(--fg2); background: transparent; }
     .cols .ctl svg { width: 1.2em; height: 1.2em; }
     .cols .ctl:hover { background: var(--bg3); color: var(--accent); }
@@ -86,39 +79,36 @@
       display: grid; gap: .7em; margin-top: .55em;
       grid-template-columns: repeat(auto-fill, minmax(max(9em, calc((100% - (var(--cols, 4) - 1) * .7em) / var(--cols, 4))), 1fr));
     }
-    .card { position: relative; border: 1px solid var(--line); border-radius: .7em; overflow: hidden; background: var(--bg); transition: transform .12s, box-shadow .12s, border-color .12s; }
-    .card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(15,44,77,.12); border-color: var(--line2); }
-    :host([data-theme="dark"]) .card:hover { box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+    .card {
+      position: relative; border: 1px solid var(--line); border-radius: .7em; overflow: hidden;
+      background: var(--bg); transition: transform .12s, box-shadow .12s, border-color .12s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,44,77,.1); border-color: var(--line2); }
+    :host([data-theme="dark"]) .card:hover { box-shadow: 0 10px 24px rgba(0,0,0,.42); }
+    .card.pinned { border-color: var(--accent); }
     .hit { display: block; text-decoration: none; color: inherit; }
     .thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: var(--bg3); overflow: hidden; }
     .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-    .thumb .rec { position: absolute; top: .4em; left: .4em; font-size: .62em; font-weight: 700; letter-spacing: .03em; color: #3d2b00; background: var(--gold); padding: .2em .5em; border-radius: .5em; }
-    .body { display: block; padding: .5em .65em .6em; }
-    .nm { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .88em; font-weight: 600; line-height: 1.3; min-height: 2.6em; overflow-wrap: anywhere; }
+    .thumb .rec {
+      position: absolute; top: .4em; left: .4em; font-size: .62em; font-weight: 700; letter-spacing: .03em;
+      color: #fff; background: rgba(13,22,38,.62); padding: .22em .5em; border-radius: .4em;
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    }
+    .body { display: block; padding: .5em .65em .65em; }
+    .nm { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .88em; font-weight: 600; line-height: 1.32; min-height: 2.6em; overflow-wrap: anywhere; }
     .cat { display: block; margin-top: .15em; font-size: .74em; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; padding-right: 2.1em; }
-    .prog { display: block; height: 3px; border-radius: 3px; background: var(--bg3); margin-top: .4em; overflow: hidden; }
-    .prog i { display: block; height: 100%; background: var(--gold); border-radius: 3px; }
-    .dl {
+    .pin {
       position: absolute; right: .45em; bottom: .5em; width: 1.95em; height: 1.95em; border: 1px solid transparent;
       border-radius: .45em; background: var(--bg2); color: var(--fg2); display: flex; align-items: center; justify-content: center;
-      cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, background .12s;
+      cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, background .12s, border-color .12s;
     }
-    .card:hover .dl, .card:focus-within .dl, .dl:disabled { opacity: 1; }
-    .dl:hover { color: var(--accent); background: var(--accent-bg); }
-    .dl svg { width: 1em; height: 1em; }
-    .dl .spin { animation: spin .9s linear infinite; transform-origin: 50% 50%; }
-    .dl:disabled { cursor: default; }
-    @media (hover: none) { .dl { opacity: 1; } }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .card:hover .pin, .card:focus-within .pin, .pin.on { opacity: 1; }
+    .pin:hover { color: var(--accent); background: var(--accent-bg); }
+    .pin.on { color: var(--accent); background: var(--accent-bg); border-color: var(--accent); }
+    .pin svg { width: 1em; height: 1em; }
+    @media (hover: none) { .pin { opacity: 1; } }
     .empty { grid-column: 1 / -1; padding: 2em 1em; text-align: center; color: var(--fg2); font-size: .85em; }
     .empty b { display: block; color: var(--fg); font-size: 1.1em; margin-bottom: .25em; }
-    .toast {
-      position: fixed; left: 50%; bottom: 1.4em; transform: translate(-50%, .5em);
-      background: #17395f; color: #fff; font-size: 13px; padding: .55em .9em; border-radius: .55em;
-      box-shadow: 0 10px 30px rgba(0,0,0,.28); opacity: 0; transition: .18s; pointer-events: none; z-index: 2147483000;
-      max-width: 80vw; text-align: center;
-    }
-    .toast.on { opacity: 1; transform: translate(-50%, 0); }
   `;
 
   function boot() {
@@ -169,19 +159,16 @@
       }
     }, 2500);
 
-    LHU.onPrefs((p) => {
-      const sortChanged = p.courseSort !== prefs.courseSort;
+    const syncPrefs = (p) => {
+      const repaint = p.courseSort !== prefs.courseSort
+        || p.coursePins.join() !== prefs.coursePins.join();
       Object.assign(prefs, p);
       paintPrefs();
-      if (sortChanged) paintMine();
-    });
+      if (repaint) paintMine();
+    };
+    LHU.onPrefs(syncPrefs);
     init();
-    LHU.getPrefs().then((p) => {
-      const sortChanged = p.courseSort !== prefs.courseSort;
-      Object.assign(prefs, p);
-      paintPrefs();
-      if (sortChanged) paintMine();
-    });
+    LHU.getPrefs().then(syncPrefs);
   }
 
   function readRecent(section) {
@@ -194,11 +181,8 @@
   }
 
   function createWidget(w, placeholder) {
-    const host = document.createElement('div');
-    host.id = w.id === 'mine' ? 'lhu-courses' : 'lhu-discover-courses';
-    const sr = host.attachShadow({ mode: 'open' });
     const isMine = w.id === 'mine';
-    sr.innerHTML = `<style>${CSS}</style>
+    const { host, sr } = LHU.mountShadow(isMine ? 'lhu-courses' : 'lhu-discover-courses', [LHU.THEME_CSS, CSS], `
       <div class="wrap">
         <div class="tools">
           ${isMine ? '' : '<select class="pick" aria-label="Chọn danh mục môn học"><option value="">Chọn danh mục…</option></select>'}
@@ -219,8 +203,7 @@
           <button class="lnk exp" hidden></button>
         </div>
         <div class="grid"></div>
-        ${isMine ? '<div class="toast"></div>' : ''}
-      </div>`;
+      </div>`);
 
     w.host = host;
     w.sr = sr;
@@ -232,7 +215,6 @@
     w.pick = sr.querySelector('.pick');
     if (isMine) {
       themeBtn = sr.querySelector('[data-act="theme"]');
-      toastEl = sr.querySelector('.toast');
     } else {
       w.pick.addEventListener('change', () => selectCategory(Number(w.pick.value)));
     }
@@ -330,11 +312,24 @@
       return;
     }
 
-    const dl = e.target.closest('[data-dl]');
-    if (dl) {
+    const pin = e.target.closest('[data-pin]');
+    if (pin) {
       e.preventDefault();
-      downloadCourse(Number(dl.dataset.dl), dl);
+      togglePin(Number(pin.dataset.pin));
     }
+  }
+
+  function togglePin(id) {
+    if (!id) return;
+    const pins = prefs.coursePins.includes(id)
+      ? prefs.coursePins.filter(x => x !== id)
+      : [id, ...prefs.coursePins];
+    prefs.coursePins = pins;
+    paintMine();
+    LHU.setPrefs({ coursePins: pins }).then((p) => {
+      Object.assign(prefs, p);
+      paintMine();
+    });
   }
 
   function paintPrefs() {
@@ -375,8 +370,7 @@
 
     w.grid.innerHTML = shown.length
       ? shown.map(c => cardHtml(c, w.id === 'mine', w.id === 'mine' && recentIds.includes(c.id))).join('')
-      : `<div class="empty"><b>${esc(meta.emptyTitle)}</b>${esc(meta.emptyHint)}</div>`;
-    w.count.textContent = tokens.length ? `${filtered.length} / ${list.length} môn` : meta.count;
+      : `<div class="empty"><b>${esc(meta.emptyTitle)}</b>${esc(meta.emptyHint)}</div>`;    w.count.textContent = tokens.length ? `${filtered.length} / ${list.length} môn` : meta.count;
     w.exp.hidden = tokens.length > 0 || filtered.length <= COLLAPSED;
     w.exp.textContent = w.expanded ? 'Thu gọn' : `Xem tất cả ${filtered.length} môn`;
   }
@@ -399,18 +393,26 @@
     }
 
     const az = prefs.courseSort === 'az';
+    const pinRank = new Map(prefs.coursePins.map((id, i) => [id, i]));
     const rank = new Map(recentIds.map((id, i) => [id, i]));
     const list = mine.items.slice().sort((a, b) => {
+      const pa = pinRank.has(a.id) ? pinRank.get(a.id) : 1e9;
+      const pb = pinRank.has(b.id) ? pinRank.get(b.id) : 1e9;
+      if (pa !== pb) return pa - pb;
       if (az) return LHU.compareCourseNames(a.name, b.name);
       const ra = rank.has(a.id) ? rank.get(a.id) : 1e9;
       const rb = rank.has(b.id) ? rank.get(b.id) : 1e9;
       return ra !== rb ? ra - rb : a.name.localeCompare(b.name, 'vi');
     });
 
+    const pinned = list.filter(c => pinRank.has(c.id)).length;
+    const detail = [
+      pinned ? `${pinned} ghim` : '',
+      az ? 'A–Z' : recentIds.length ? `${recentIds.length} gần đây` : ''
+    ].filter(Boolean).join(' · ');
+
     paintList(mine, list, {
-      count: az
-        ? `${list.length} môn · A–Z`
-        : recentIds.length ? `${list.length} môn · ${recentIds.length} gần đây` : `${list.length} môn`,
+      count: detail ? `${list.length} môn · ${detail}` : `${list.length} môn`,
       emptyTitle: 'Không tìm thấy môn',
       emptyHint: 'Thử từ khóa ngắn hơn, không cần dấu.'
     });
@@ -479,10 +481,11 @@
     return tokens.every(t => hay.includes(t));
   }
 
-  function cardHtml(c, allowDownload, recent) {
-    const progress = typeof c.progress === 'number' && c.progress > 0 ? Math.min(100, c.progress) : null;
+  function cardHtml(c, allowPin, recent) {
     const cat = c.category || c.short || '';
-    return `<article class="card">
+    const pinned = allowPin && prefs.coursePins.includes(c.id);
+    const pinTitle = pinned ? 'Bỏ ghim môn học' : 'Ghim môn học lên đầu';
+    return `<article class="card${pinned ? ' pinned' : ''}">
       <a class="hit" href="${esc(c.url)}" title="${esc(c.name)}">
         <span class="thumb">
           <img src="${esc(c.image || NO_COVER)}" alt="${c.image ? '' : 'Chưa có ảnh bìa'}" loading="lazy" decoding="async">
@@ -491,14 +494,13 @@
         <span class="body">
           <span class="nm">${esc(c.name)}</span>
           <span class="cat">${esc(cat) || '&nbsp;'}</span>
-          ${progress !== null ? `<span class="prog"><i style="width:${progress}%"></i></span>` : ''}
         </span>
       </a>
-      ${allowDownload ? `<button class="dl" data-dl="${c.id}" title="Tải tài liệu môn này" aria-label="Tải tài liệu môn ${esc(c.name)}">${I.download}</button>` : ''}
+      ${allowPin ? `<button class="pin${pinned ? ' on' : ''}" data-pin="${c.id}" aria-pressed="${pinned}" title="${pinTitle}" aria-label="${pinTitle}: ${esc(c.name)}">${I.pin}</button>` : ''}
     </article>`;
   }
 
-  async function init(force = false) {
+  async function init() {
     mine.loading = true;
     mine.error = false;
     disc.categoriesLoading = true;
@@ -519,7 +521,7 @@
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const { list } = await LHU.loadCourses(force || attempt > 0);
+        const { list } = await LHU.loadCourses(attempt > 0);
         mine.items = list || [];
       } catch (e) {
         mine.items = [];
@@ -532,7 +534,7 @@
     paintMine();
 
     try {
-      disc.categories = (await LHU.loadCourseCategories(force)) || [];
+      disc.categories = (await LHU.loadCourseCategories()) || [];
     } catch (e) {
       disc.categories = [];
     }
@@ -541,49 +543,6 @@
     paintDisc();
     syncSurface();
   }
-
-  async function downloadCourse(id, btn) {
-    if (btn.disabled) return;
-    const course = mine.items.find(c => c.id === id);
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spin">${I.refresh}</span>`;
-    try {
-      const items = await LHU.courseActivities(id);
-      if (!items) {
-        toast('Không đọc được môn này');
-        return;
-      }
-      const files = await LHU.filesForCourse(id);
-      if (!files.length) {
-        toast('Môn này không có tệp tải được');
-        return;
-      }
-      const res = await msg({ type: 'lhu:download', files, folder: course?.short || course?.name || '' });
-      toast(res && res.ok ? `Đang tải ${files.length} tệp…` : 'Chrome không phản hồi — thử lại');
-    } catch (e) {
-      toast('Tải thất bại');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = I.download;
-    }
-  }
-
-  function toast(text, ms = 2600) {
-    if (!toastEl) return;
-    toastEl.textContent = text;
-    toastEl.classList.add('on');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toastEl.classList.remove('on'), ms);
-  }
-
-  (globalThis.chrome?.runtime?.onMessage)?.addListener((m) => {
-    if (!m) return;
-    if (m.type === 'lhu:dl-progress') {
-      toast(m.done >= m.total ? `Xong ${m.total} tệp` : `Đã tải ${m.done}/${m.total}`);
-    } else if (m.type === 'lhu:refresh') {
-      init(true);
-    }
-  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot, { once: true });

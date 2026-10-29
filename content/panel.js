@@ -7,10 +7,14 @@
   if (!LHU || !LHU.THEME_CSS || !document.body) return;
 
   const I = LHU.ICONS;
+  const esc = LHU.esc;
   const DAY = 86400000;
   const WINDOW_LABEL = { 7: '1 tuần', 14: '2 tuần', 30: '1 tháng', 90: '3 tháng' };
 
-  let prefs = { theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14 };
+  let prefs = {
+    theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
+    courseSort: 'off', autoExtend: true, coursePins: []
+  };
   const state = {
     open: false,
     pinned: false,
@@ -20,101 +24,103 @@
     data: null
   };
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
   const CSS = `
-    ${LHU.THEME_CSS}
     :host { all: initial; }
     * { box-sizing: border-box; }
     .root {
       position: fixed; right: 0; top: 22%; z-index: 2147483000;
       font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: calc(13.5px * var(--lhu-fs, 1)); line-height: 1.35;
+      font-size: calc(13.5px * var(--lhu-fs, 1)); line-height: 1.4;
       color: var(--fg);
       display: flex; align-items: flex-start;
     }
     button, select { font-family: inherit; }
     .tab {
-      position: relative; width: 2.15em; padding: .6em 0 .7em; border: 0; flex: none; cursor: pointer;
-      border-radius: .8em 0 0 .8em;
-      background: var(--tile);
-      box-shadow: -.3em 0 1.3em rgba(15,44,77,.25);
-      display: flex; flex-direction: column; align-items: center; gap: .35em;
+      position: relative; width: 2.4em; padding: .65em 0 .75em; flex: none; cursor: pointer;
+      border: 1px solid var(--line2); border-right: 0;
+      border-radius: .85em 0 0 .85em;
+      background: var(--bg); color: var(--accent);
+      box-shadow: -8px 0 24px rgba(15,44,77,.12);
+      display: flex; flex-direction: column; align-items: center; gap: .4em;
+      transition: background .15s;
     }
-    .tab svg { width: 1.15em; height: 1.15em; }
-    .tab .tl { font-size: .6em; font-weight: 800; letter-spacing: .1em; color: rgba(255,255,255,.82); writing-mode: vertical-rl; }
+    .tab:hover { background: var(--bg2); }
+    :host([data-theme="dark"]) .tab { box-shadow: -8px 0 24px rgba(0,0,0,.4); }
+    .tab svg { width: 1.2em; height: 1.2em; }
+    .tab .tl { font-size: .58em; font-weight: 700; letter-spacing: .14em; color: var(--fg2); writing-mode: vertical-rl; }
     .tab .badge {
-      position: absolute; top: .28em; right: .24em; min-width: 1.3em; height: 1.3em; padding: 0 .22em;
-      border-radius: 999px; background: var(--gold); color: #3d2b00;
-      font-size: .62em; font-weight: 800; display: none; align-items: center; justify-content: center;
-      box-shadow: 0 0 0 1.5px rgba(15,44,77,.35);
+      position: absolute; top: -.62em; left: 50%; transform: translateX(-50%);
+      min-width: 1.35em; height: 1.35em; padding: 0 .22em;
+      border-radius: 999px; background: var(--accent); color: #fff;
+      font-size: .62em; font-weight: 700; display: none; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 2px var(--bg);
     }
     .tab .badge.on { display: flex; }
-    .tab .badge.hot { background: #e5484d; color: #fff; }
+    .tab .badge.hot { background: var(--danger); }
+    :host([data-theme="dark"]) .tab .badge { color: #0f1a2b; }
+    :host([data-theme="dark"]) .tab .badge.hot { background: #e5484d; color: #fff; }
     .panel {
-      position: absolute; right: 2.15em; top: 0;
+      position: absolute; right: 2.4em; top: 0;
       width: 25em; max-width: 88vw; max-height: 64vh;
       display: flex; flex-direction: column; overflow: hidden;
-      background: var(--bg); border-radius: .95em 0 0 .95em;
-      box-shadow: var(--shadow), 0 0 0 1px var(--line);
+      background: var(--bg); border: 1px solid var(--line); border-right: 0;
+      border-radius: .95em 0 0 .95em;
+      box-shadow: var(--shadow);
       opacity: 0; visibility: hidden; transform: translateX(.6em);
       transition: opacity .16s ease, transform .16s ease, visibility .16s;
     }
     .root.open .panel { opacity: 1; visibility: visible; transform: none; }
-    .hint { position: absolute; right: 2.8em; top: .4em; width: 15em; padding: .6em .8em; border: 1px solid var(--line2); border-radius: .65em; background: var(--bg); color: var(--fg); box-shadow: var(--shadow-sm); font-size: .85em; opacity: 0; visibility: hidden; pointer-events: none; }
+    .hint { position: absolute; right: 3em; top: .4em; width: 15em; padding: .6em .8em; border: 1px solid var(--line2); border-radius: .6em; background: var(--bg); color: var(--fg); box-shadow: var(--shadow-sm); font-size: .85em; opacity: 0; visibility: hidden; pointer-events: none; }
     .root.guest:hover .hint, .root.guest:focus-within .hint { opacity: 1; visibility: visible; }
     .root.guest .tab { cursor: default; }
-    header { display: flex; align-items: center; gap: .45em; padding: .6em .7em .55em .8em; border-bottom: 1px solid var(--line); }
-    .brand { width: 1.75em; height: 1.75em; border-radius: .45em; background: var(--tile); display: flex; align-items: center; justify-content: center; flex: none; }
-    .brand svg { width: 1.15em; height: 1.15em; }
+    header { display: flex; align-items: center; gap: .45em; padding: .6em .6em .55em .75em; border-bottom: 1px solid var(--line); }
+    .brand { width: 1.8em; height: 1.8em; border-radius: .5em; background: var(--accent-bg); color: var(--accent); display: flex; align-items: center; justify-content: center; flex: none; }
+    .brand svg { width: 1.1em; height: 1.1em; }
     .tt { font-size: .95em; font-weight: 700; letter-spacing: .01em; color: var(--brand); }
     .grow { flex: 1; }
     .ico {
-      width: 1.8em; height: 1.8em; border: 0; background: transparent; border-radius: .45em;
+      width: 1.8em; height: 1.8em; border: 0; background: transparent; border-radius: .5em;
       color: var(--fg2); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
     }
-    .ico:hover { background: var(--bg3); color: var(--brand); }
+    .ico:hover { background: var(--bg2); color: var(--fg); }
     .ico.on { background: var(--accent-bg); color: var(--accent); }
     .ico svg { width: 1.05em; height: 1.05em; }
     .spinner { animation: spin .9s linear infinite; transform-origin: 50% 50%; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    nav { display: flex; gap: .15em; padding: .4em .55em 0; background: var(--bg2); border-bottom: 1px solid var(--line); }
+    nav { display: flex; gap: .25em; padding: .45em .55em; border-bottom: 1px solid var(--line); }
     nav button {
       flex: 1; border: 0; background: transparent; color: var(--fg2); font-family: inherit;
-      font-size: .86em; font-weight: 600; padding: .4em .15em .5em; border-radius: .45em .45em 0 0; cursor: pointer;
-      box-shadow: inset 0 0 0 transparent;
+      font-size: .84em; font-weight: 600; padding: .42em .15em; border-radius: .5em; cursor: pointer;
     }
-    nav button:hover { color: var(--fg); background: var(--bg3); }
-    nav button.on { color: var(--brand); background: var(--bg); box-shadow: inset 0 2px 0 var(--gold); }
+    nav button:hover { background: var(--bg2); color: var(--fg); }
+    nav button.on { background: var(--accent-bg); color: var(--accent); }
     nav .n {
       display: inline-block; min-width: 1.35em; margin-left: .3em; padding: .05em .3em;
       border-radius: 999px; background: var(--bg3); color: var(--fg2); font-size: .78em;
     }
-    nav button.on .n { background: var(--accent-bg); color: var(--accent); }
+    nav button.on .n { background: var(--bg); color: var(--accent); }
     #body { overflow-y: auto; overscroll-behavior: contain; flex: 1; padding: .25em .35em .4em; min-height: 4em; }
     #body::-webkit-scrollbar { width: 7px; }
     #body::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 8px; border: 2px solid var(--bg); }
     .cap { font-size: .72em; font-weight: 600; color: var(--fg2); padding: .3em .55em .1em; }
     .grp { margin-top: .15em; }
     .gh { display: flex; align-items: center; gap: .4em; padding: .45em .55em .1em; }
-    .gname { font-size: .72em; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gname { font-size: .72em; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .gcnt { font-size: .64em; font-weight: 700; color: var(--fg2); background: var(--bg3); border-radius: 999px; padding: .08em .4em; flex: none; }
     .row { display: flex; gap: .5em; align-items: flex-start; padding: .45em .55em; border-radius: .5em; text-decoration: none; color: inherit; min-width: 0; }
     .row:hover, .row:focus-visible { background: var(--bg2); outline: none; }
-    .ic { flex: none; width: 1.5em; height: 1.5em; border-radius: .4em; background: var(--bg3); color: var(--brand); display: flex; align-items: center; justify-content: center; }
+    .ic { flex: none; width: 1.5em; height: 1.5em; border-radius: .4em; background: var(--accent-bg); color: var(--accent); display: flex; align-items: center; justify-content: center; }
     .ic svg { width: .95em; height: .95em; }
     .main { min-width: 0; flex: 1; }
-    .nm { font-size: .9em; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    .nm { font-size: .9em; font-weight: 600; line-height: 1.32; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
     .meta { font-size: .75em; color: var(--fg2); margin-top: .1em; display: flex; gap: .25em; min-width: 0; }
     .meta .due { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip { font-size: .68em; font-weight: 700; padding: .18em .45em; border-radius: 999px; white-space: nowrap; flex: none; margin-top: .1em; }
+    .chip { font-size: .68em; font-weight: 600; padding: .18em .5em; border-radius: 999px; white-space: nowrap; flex: none; margin-top: .1em; }
     .chip.red { background: #fdecec; color: #c62a2f; }
-    .chip.amber { background: #fff4e2; color: #a86a00; }
-    .chip.blue { background: #eaf1fe; color: #1f5fd0; }
+    .chip.blue { background: var(--accent-bg); color: #1f5fd0; }
     .chip.muted { background: var(--bg3); color: var(--fg2); }
     :host([data-theme="dark"]) .chip.red { background: rgba(229,72,77,.16); color: #ff9c9c; }
-    :host([data-theme="dark"]) .chip.amber { background: rgba(244,180,40,.14); color: #f4cb62; }
-    :host([data-theme="dark"]) .chip.blue { background: rgba(122,162,255,.14); color: #a9c4ff; }
+    :host([data-theme="dark"]) .chip.blue { background: var(--accent-bg); color: #a9c4ff; }
     .empty { padding: 1.6em .8em; text-align: center; color: var(--fg2); font-size: .82em; }
     .empty b { display: block; color: var(--fg); font-size: 1.06em; font-weight: 600; margin-bottom: .25em; }
     footer {
@@ -123,7 +129,7 @@
     }
     .winl { white-space: nowrap; }
     #win {
-      height: 1.95em; border: 1px solid var(--line2); border-radius: .4em; background: var(--bg);
+      height: 1.95em; border: 1px solid var(--line2); border-radius: .45em; background: var(--bg);
       color: var(--fg); font: inherit; font-size: 1em; padding: 0 .25em; cursor: pointer; outline: none;
     }
     #win:focus { border-color: var(--accent); }
@@ -149,16 +155,14 @@
   }
 
   function mount() {
-    host = document.createElement('div');
-    host.id = 'lhu-aid-root';
-    sr = host.attachShadow({ mode: 'open' });
-    sr.innerHTML = `<style>${CSS}</style>
+    const built = LHU.mountShadow('lhu-aid-root', [LHU.THEME_CSS, CSS], `
       <div class="root">
         <div class="panel" role="dialog" aria-label="Hạn nộp">
           <header>
-            <span class="brand">${I.brand}</span>
+            <span class="brand">${I.deadline}</span>
             <span class="tt">Hạn nộp</span>
             <span class="grow"></span>
+            <button class="ico" data-act="extend" title="Tắt tự động gia hạn phiên" aria-label="Tắt tự động gia hạn phiên" aria-pressed="true">${I.clock}</button>
             <button class="ico" data-act="refresh" title="Làm mới" aria-label="Làm mới">${I.refresh}</button>
             <button class="ico" data-act="pin" title="Ghim panel" aria-label="Ghim panel">${I.pin}</button>
           </header>
@@ -178,9 +182,11 @@
             </div>
           </footer>
         </div>
-        <button class="tab" data-act="toggle" aria-label="Mở hạn nộp" aria-describedby="login-hint">${I.brand}<span class="tl">HẠN</span><span class="badge"></span></button>
+        <button class="tab" data-act="toggle" title="Hạn nộp" aria-label="Mở hạn nộp" aria-describedby="login-hint">${I.deadline}<span class="tl">HẠN NỘP</span><span class="badge"></span></button>
         <span class="hint" id="login-hint" role="tooltip">Đăng nhập để xem hạn nộp.</span>
-      </div>`;
+      </div>`);
+    host = built.host;
+    sr = built.sr;
 
     root = sr.querySelector('.root');
     panel = sr.querySelector('.panel');
@@ -219,8 +225,8 @@
 
     init();
     setInterval(() => {
-      if (!state.data) return;
-      renderCounts();
+      if (!state.data || document.hidden) return;
+      renderTabs();
       if (state.open) renderBody();
     }, 60000);
   }
@@ -231,7 +237,7 @@
     applyAll();
     if (!LHU.isLoggedIn()) { state.loading = false; return; }
     setBody('<div class="empty"><b>Đang tải hạn nộp…</b>Đang đọc lịch học của bạn.</div>');
-    await refreshData({ silent: true });
+    await refreshData();
   }
 
   function onPrefsChange(p) {
@@ -262,6 +268,13 @@
       pin.classList.toggle('on', state.pinned);
       pin.title = state.pinned ? 'Bỏ ghim panel' : 'Ghim panel';
     }
+    const ext = panel.querySelector('[data-act="extend"]');
+    if (ext) {
+      ext.classList.toggle('on', prefs.autoExtend);
+      ext.setAttribute('aria-pressed', String(prefs.autoExtend));
+      ext.title = prefs.autoExtend ? 'Tắt tự động gia hạn phiên' : 'Bật tự động gia hạn phiên';
+      ext.setAttribute('aria-label', ext.title);
+    }
     renderPinState();
     renderTabs();
   }
@@ -288,6 +301,10 @@
       state.pinned = !state.pinned;
       renderPinState();
       LHU.setPrefs({ pinned: state.pinned });
+    } else if (act === 'extend') {
+      prefs = { ...prefs, autoExtend: !prefs.autoExtend };
+      applyAll();
+      LHU.setPrefs({ autoExtend: prefs.autoExtend });
     } else if (act === 'fs-' || act === 'fs+') {
       stepFs(act === 'fs+' ? 1 : -1);
     }
@@ -303,7 +320,7 @@
     if (!LHU.isLoggedIn()) return;
     state.open = true;
     root.classList.add('open');
-    if (state.data) refreshData({ silent: true });
+    if (state.data) refreshData();
   }
 
   function closePanel() {
@@ -337,7 +354,7 @@
     LHU.setPrefs({ overdueDays: days });
   }
 
-  async function refreshData({ force = false, silent = false } = {}) {
+  async function refreshData({ force = false } = {}) {
     if (!LHU.isLoggedIn()) return;
     if (state.loading && state.data) return;
     state.loading = true;
@@ -397,10 +414,6 @@
     tabBadge.classList.toggle('hot', over.length > 0);
   }
 
-  function renderCounts() {
-    renderTabs();
-  }
-
   function groupByCourse(list) {
     const groups = new Map();
     for (const ev of list) {
@@ -437,9 +450,9 @@
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
-    if (diff <= 0) return { text: 'hôm nay', cls: 'amber' };
-    if (diff === 1) return { text: 'mai', cls: 'amber' };
-    if (diff <= 7) return { text: `còn ${diff} ngày`, cls: 'blue' };
+    if (diff <= 0) return { text: 'hôm nay', cls: 'blue' };
+    if (diff === 1) return { text: 'mai', cls: 'blue' };
+    if (diff <= 7) return { text: `còn ${diff} ngày`, cls: 'muted' };
     return { text: d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }), cls: 'muted' };
   }
 
@@ -498,9 +511,7 @@
   }
 
   (globalThis.chrome?.runtime?.onMessage)?.addListener((m) => {
-    if (!m) return;
-    if (m.type === 'lhu:toggle') togglePanel();
-    else if (m.type === 'lhu:refresh') refreshData({ force: true, silent: true });
+    if (m?.type === 'lhu:toggle') togglePanel();
   });
 
   function shouldMount() {

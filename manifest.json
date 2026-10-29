@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
   "name": "LHU Aid",
-  "version": "3.0.0",
-  "description": "Trợ lý học tập cho learn.lhu.edu.vn: nền tối toàn trang, panel hạn nộp, lưới môn học có tìm kiếm và tải trọn bộ tệp môn học.",
+  "version": "3.2.0",
+  "description": "Trợ lý học tập cho learn.lhu.edu.vn: nền tối toàn trang, panel hạn nộp, ghim môn học, lưới môn học có tìm kiếm và tự động gia hạn phiên đăng nhập.",
   "permissions": [
-    "storage",
-    "downloads"
+    "storage"
   ],
   "host_permissions": [
     "https://learn.lhu.edu.vn/*"
@@ -29,7 +28,7 @@
         "https://learn.lhu.edu.vn/*"
       ],
       "js": [
-        "content/shared.js",
+        "content/auto-extend.js",
         "content/session.js",
         "content/scrape.js",
         "content/course-sort.js",
