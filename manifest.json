@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LHU Aid",
-  "version": "3.2.0",
-  "description": "Trợ lý học tập cho learn.lhu.edu.vn: nền tối toàn trang, panel hạn nộp, ghim môn học, lưới môn học có tìm kiếm và tự động gia hạn phiên đăng nhập.",
+  "version": "3.4.0",
+  "description": "Trợ lý học tập cho learn.lhu.edu.vn: nền tối toàn trang, panel hạn nộp, môn học ưu tiên kéo–thả với ô tùy chỉnh, lưới môn học có tìm kiếm và tự động gia hạn phiên đăng nhập.",
   "permissions": [
     "storage"
   ],

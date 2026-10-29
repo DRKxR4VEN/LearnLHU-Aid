@@ -13,7 +13,7 @@
 
   let prefs = {
     theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
-    courseSort: 'off', autoExtend: true, coursePins: []
+    courseSort: 'off', autoExtend: true, priority: []
   };
   const state = {
     open: false,

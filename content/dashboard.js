@@ -12,13 +12,17 @@
   const DISCOVER_TITLE = 'Khám phá môn học';
   const NO_COVER = chrome.runtime.getURL('icons/course-no-cover.svg');
 
+  const SLOTS_MAX = LHU.PRIORITY_SLOTS_MAX || 20;
   const prefs = {
     theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
-    courseSort: 'off', autoExtend: true, coursePins: []
+    courseSort: 'off', autoExtend: true, priority: [], prioritySlots: 5
   };
   let recentIds = [];
   let themeBtn = null;
   let discRequest = 0;
+  let mineOrder = [];
+  let drag = null;
+  let flashTimer = 0;
 
   const mine = { id: 'mine', items: [], query: '', expanded: false, loading: true, error: false };
   const disc = {
@@ -64,8 +68,6 @@
     }
     .ctl:hover { border-color: var(--accent); color: var(--accent); }
     .ctl svg { width: 1.1em; height: 1.1em; }
-    .ctl.sort { font-size: .78em; font-weight: 700; letter-spacing: .02em; padding: 0 .6em; }
-    .ctl.sort.on { background: var(--accent-bg); border-color: transparent; color: var(--accent); }
     .cols { display: flex; align-items: center; gap: .1em; border: 1px solid var(--line2); border-radius: .55em; padding: .15em; background: var(--bg); }
     .cols .ctl { border: 0; min-width: 2em; height: 1.95em; padding: 0 .2em; color: var(--fg2); background: transparent; }
     .cols .ctl svg { width: 1.2em; height: 1.2em; }
@@ -75,17 +77,24 @@
     .bar .spacer { flex: 1; }
     .lnk { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 1em; font-weight: 600; cursor: pointer; padding: .25em .4em; border-radius: .35em; }
     .lnk:hover { background: var(--accent-bg); }
-    .grid {
-      display: grid; gap: .7em; margin-top: .55em;
+    .grid, .pgrid {
+      display: grid; gap: .7em;
       grid-template-columns: repeat(auto-fill, minmax(max(9em, calc((100% - (var(--cols, 4) - 1) * .7em) / var(--cols, 4))), 1fr));
     }
+    .grid, .pgrid { margin-top: .55em; }
     .card {
       position: relative; border: 1px solid var(--line); border-radius: .7em; overflow: hidden;
       background: var(--bg); transition: transform .12s, box-shadow .12s, border-color .12s;
     }
     .card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,44,77,.1); border-color: var(--line2); }
     :host([data-theme="dark"]) .card:hover { box-shadow: 0 10px 24px rgba(0,0,0,.42); }
-    .card.pinned { border-color: var(--accent); }
+    .card[draggable="true"] .thumb { cursor: grab; }
+    .card.dragging { opacity: .4; }
+    .card.drop-l::after, .card.drop-r::after {
+      content: ""; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--accent); z-index: 2;
+    }
+    .card.drop-l::after { left: 0; }
+    .card.drop-r::after { right: 0; }
     .hit { display: block; text-decoration: none; color: inherit; }
     .thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: var(--bg3); overflow: hidden; }
     .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -96,17 +105,59 @@
     }
     .body { display: block; padding: .5em .65em .65em; }
     .nm { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .88em; font-weight: 600; line-height: 1.32; min-height: 2.6em; overflow-wrap: anywhere; }
-    .cat { display: block; margin-top: .15em; font-size: .74em; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; padding-right: 2.1em; }
-    .pin {
-      position: absolute; right: .45em; bottom: .5em; width: 1.95em; height: 1.95em; border: 1px solid transparent;
-      border-radius: .45em; background: var(--bg2); color: var(--fg2); display: flex; align-items: center; justify-content: center;
-      cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, background .12s, border-color .12s;
+    .cat { display: block; margin-top: .15em; font-size: .74em; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; }
+    .addprio {
+      position: absolute; top: .4em; right: .4em; width: 1.9em; height: 1.9em; display: flex; align-items: center;
+      justify-content: center; border: 0; border-radius: .4em; background: rgba(13,22,38,.62); color: #fff;
+      cursor: pointer; opacity: 0; transition: opacity .12s, background .12s;
     }
-    .card:hover .pin, .card:focus-within .pin, .pin.on { opacity: 1; }
-    .pin:hover { color: var(--accent); background: var(--accent-bg); }
-    .pin.on { color: var(--accent); background: var(--accent-bg); border-color: var(--accent); }
-    .pin svg { width: 1em; height: 1em; }
-    @media (hover: none) { .pin { opacity: 1; } }
+    .card:hover .addprio, .card:focus-within .addprio { opacity: 1; }
+    .addprio:hover { background: var(--accent); }
+    .addprio svg { width: 1em; height: 1em; }
+    @media (hover: none) { .addprio { opacity: 1; } }
+    .prio { margin-top: .9em; }
+    .prio[hidden] { display: none; }
+    .prio-head {
+      display: flex; align-items: center; gap: .4em; padding-bottom: .45em; border-bottom: 1px solid var(--line);
+      font-size: .76em; color: var(--fg2); flex-wrap: wrap; transition: color .12s;
+    }
+    .prio-head svg { width: 1.05em; height: 1.05em; color: var(--accent); flex: none; }
+    .prio-head .pt { color: var(--fg); font-size: 1.06em; font-weight: 700; letter-spacing: .02em; }
+    .prio-head .pn { margin-left: auto; font-variant-numeric: tabular-nums; }
+    .prio.over .prio-head { color: var(--accent); }
+    .prio.over .slot-empty { border-color: var(--accent); }
+    .addslot {
+      height: 2em; padding: 0 .65em; margin-left: .15em; border: 1px solid var(--line2); border-radius: .45em; background: var(--bg);
+      color: var(--accent); font: inherit; font-size: .95em; font-weight: 700; cursor: pointer; transition: background .12s, border-color .12s;
+    }
+    .addslot:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-bg); }
+    .addslot:disabled { opacity: .45; cursor: not-allowed; }
+    .pgrid.full { animation: nope .3s; }
+    @keyframes nope { 25% { transform: translateX(-.2em); } 75% { transform: translateX(.2em); } }
+    .prio .rank {
+      position: absolute; top: .4em; left: .4em; z-index: 2; min-width: 1.55em; height: 1.55em; padding: 0 .35em;
+      display: flex; align-items: center; justify-content: center; border-radius: .4em;
+      background: var(--accent-bg); color: var(--accent); font-size: .68em; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .prio .rm {
+      position: absolute; top: .4em; right: .4em; z-index: 2; width: 1.9em; height: 1.9em; padding: 0; display: flex;
+      align-items: center; justify-content: center; border: 0; border-radius: .4em;
+      background: rgba(13,22,38,.62); color: #fff; cursor: pointer; transition: background .12s;
+    }
+    .prio .rm:hover { background: var(--danger); }
+    .prio .rm svg { width: .8em; height: .8em; }
+    .slot-empty { border: 1px dashed var(--line2); background: transparent; }
+    .slot-empty:hover { transform: none; box-shadow: none; border-color: var(--accent); }
+    .slot-empty.over { border-color: var(--accent); background: var(--accent-bg); }
+    .slot-empty .thumb { background: transparent; border-bottom: 1px dashed var(--line2); }
+    .slot-empty .ph { display: flex; align-items: center; justify-content: center; }
+    .slot-empty .ph .plus { font-size: 1.5em; line-height: 1; font-weight: 300; color: var(--fg2); opacity: .55; }
+    .slot-empty:hover .ph .plus { color: var(--accent); opacity: 1; }
+    .slot-empty .nm { color: var(--fg2); font-weight: 600; }
+    .slot-empty .cat { opacity: .8; }
+    .prio .msg { display: none; margin: .5em 0 0; font-size: .72em; color: var(--danger); }
+    .prio .msg.on { display: block; }
     .empty { grid-column: 1 / -1; padding: 2em 1em; text-align: center; color: var(--fg2); font-size: .85em; }
     .empty b { display: block; color: var(--fg); font-size: 1.1em; margin-bottom: .25em; }
   `;
@@ -160,8 +211,8 @@
     }, 2500);
 
     const syncPrefs = (p) => {
-      const repaint = p.courseSort !== prefs.courseSort
-        || p.coursePins.join() !== prefs.coursePins.join();
+      const repaint = p.priority.join() !== prefs.priority.join()
+        || p.prioritySlots !== prefs.prioritySlots;
       Object.assign(prefs, p);
       paintPrefs();
       if (repaint) paintMine();
@@ -192,7 +243,6 @@
             <button class="clr" data-act="clear" title="Xóa" hidden>${I.close}</button>
           </div>
           ${isMine ? `<button class="ctl" data-act="theme" aria-label="Đổi giao diện sáng/tối"></button>` : ''}
-          ${isMine ? `<button class="ctl sort" data-act="sort" title="Sắp xếp môn học A–Z" aria-label="Sắp xếp môn học A–Z" aria-pressed="false">A–Z</button>` : ''}
           ${isMine ? `<div class="cols" role="group" aria-label="Số ô mỗi hàng">${
             LHU.COL_STEPS.map(n => `<button class="ctl" data-cols="${n}" title="${n} ô mỗi hàng" aria-label="${n} ô mỗi hàng">${LHU.gridIcon(n)}</button>`).join('')
           }</div>` : ''}
@@ -202,6 +252,15 @@
           <span class="spacer"></span>
           <button class="lnk exp" hidden></button>
         </div>
+        ${isMine ? `<div class="prio" role="group" aria-label="Môn học ưu tiên" hidden>
+          <div class="prio-head">
+            ${I.star}<span class="pt">Ưu tiên</span><span> Kéo thả để sắp xếp, bấm × để bỏ</span>
+            <span class="pn"></span>
+            <button class="addslot" data-act="slot" title="Thêm một ô ưu tiên" aria-label="Thêm một ô ưu tiên">+1</button>
+          </div>
+          <div class="pgrid"></div>
+          <p class="msg" role="status" aria-live="polite"></p>
+        </div>` : ''}
         <div class="grid"></div>
       </div>`);
 
@@ -215,6 +274,12 @@
     w.pick = sr.querySelector('.pick');
     if (isMine) {
       themeBtn = sr.querySelector('[data-act="theme"]');
+      w.prio = sr.querySelector('.prio');
+      w.pgrid = sr.querySelector('.pgrid');
+      w.msg = sr.querySelector('.prio .msg');
+      w.prioCount = sr.querySelector('.pn');
+      w.addSlot = sr.querySelector('.addslot');
+      bindDrag(sr);
     } else {
       w.pick.addEventListener('change', () => selectCategory(Number(w.pick.value)));
     }
@@ -291,11 +356,8 @@
         prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
         paintPrefs();
         LHU.setPrefs({ theme: prefs.theme }).then((p) => { Object.assign(prefs, p); paintPrefs(); });
-      } else if (act.dataset.act === 'sort') {
-        prefs.courseSort = prefs.courseSort === 'az' ? 'off' : 'az';
-        paintPrefs();
-        paintMine();
-        LHU.setPrefs({ courseSort: prefs.courseSort }).then((p) => { Object.assign(prefs, p); paintPrefs(); paintMine(); });
+      } else if (act.dataset.act === 'slot') {
+        addSlot();
       } else if (act.dataset.act === 'clear') {
         w.q.value = '';
         w.query = '';
@@ -312,23 +374,202 @@
       return;
     }
 
-    const pin = e.target.closest('[data-pin]');
-    if (pin) {
+    const remove = e.target.closest('[data-remove]');
+    if (remove && w.id === 'mine') {
       e.preventDefault();
-      togglePin(Number(pin.dataset.pin));
+      removeFromPriority(Number(remove.dataset.remove));
+      return;
+    }
+
+    const add = e.target.closest('[data-add]');
+    if (add && w.id === 'mine') {
+      e.preventDefault();
+      addToPriority(Number(add.dataset.add));
     }
   }
 
-  function togglePin(id) {
-    if (!id) return;
-    const pins = prefs.coursePins.includes(id)
-      ? prefs.coursePins.filter(x => x !== id)
-      : [id, ...prefs.coursePins];
-    prefs.coursePins = pins;
+  function slotCap() {
+    return Math.max(prefs.prioritySlots, prefs.priority.length);
+  }
+
+  function savePriority(list) {
+    prefs.priority = list.slice(0, SLOTS_MAX);
     paintMine();
-    LHU.setPrefs({ coursePins: pins }).then((p) => {
+    LHU.setPrefs({ priority: prefs.priority }).then((p) => {
       Object.assign(prefs, p);
       paintMine();
+    });
+  }
+
+  function addSlot() {
+    const cap = slotCap();
+    if (cap >= SLOTS_MAX) {
+      flash(`Tối đa ${SLOTS_MAX} ô ưu tiên.`);
+      return;
+    }
+    prefs.prioritySlots = cap + 1;
+    paintMine();
+    LHU.setPrefs({ prioritySlots: prefs.prioritySlots }).then((p) => {
+      Object.assign(prefs, p);
+      paintMine();
+    });
+  }
+
+  function addToPriority(id) {
+    if (!id) return;
+    if (prefs.priority.includes(id)) return;
+    if (prefs.priority.length >= slotCap()) {
+      flash(`Đã đủ ${slotCap()} ô ưu tiên. Bấm +1 để thêm ô.`);
+      return;
+    }
+    mineOrder = mineOrder.filter(x => x !== id);
+    savePriority([...prefs.priority, id]);
+  }
+
+  function removeFromPriority(id) {
+    if (!id || !prefs.priority.includes(id)) return;
+    if (!mineOrder.includes(id)) mineOrder.push(id);
+    savePriority(prefs.priority.filter(x => x !== id));
+  }
+
+  // indexHint is an insertion point measured on the current priority list.
+  function dropToPriority(id, indexHint) {
+    const cur = prefs.priority;
+    const isNew = !cur.includes(id);
+    if (isNew && cur.length >= slotCap()) {
+      flash(`Đã đủ ${slotCap()} ô ưu tiên. Bấm +1 để thêm ô.`);
+      return;
+    }
+    const without = cur.filter(x => x !== id);
+    let at = indexHint;
+    const from = cur.indexOf(id);
+    if (from >= 0 && from < at) at--;
+    at = Math.max(0, Math.min(at, without.length));
+    without.splice(at, 0, id);
+    savePriority(without);
+  }
+
+  function dropToGrid(moving, targetId, after) {
+    const rest = mineOrder.filter(x => !prefs.priority.includes(x));
+    let index = rest.indexOf(targetId);
+    index = index < 0 ? rest.length : index + (after ? 1 : 0);
+    if (moving.from === 'grid') {
+      const from = rest.indexOf(moving.id);
+      if (from >= 0) {
+        rest.splice(from, 1);
+        if (from < index) index--;
+      }
+      rest.splice(Math.max(0, Math.min(index, rest.length)), 0, moving.id);
+      mineOrder = rest;
+      paintMine();
+      return;
+    }
+    rest.splice(Math.max(0, Math.min(index, rest.length)), 0, moving.id);
+    mineOrder = rest;
+    savePriority(prefs.priority.filter(x => x !== moving.id));
+  }
+
+  function flash(text) {
+    if (!mine.msg) return;
+    mine.msg.textContent = text;
+    mine.msg.classList.toggle('on', !!text);
+    if (mine.pgrid) {
+      mine.pgrid.classList.remove('full');
+      void mine.pgrid.offsetWidth;
+      mine.pgrid.classList.add('full');
+    }
+    clearTimeout(flashTimer);
+    if (text) flashTimer = setTimeout(() => {
+      mine.msg.textContent = '';
+      mine.msg.classList.remove('on');
+    }, 3200);
+  }
+
+  function clearHints() {
+    if (!mine.sr) return;
+    for (const el of mine.sr.querySelectorAll('.over, .drop-l, .drop-r')) {
+      el.classList.remove('over', 'drop-l', 'drop-r');
+    }
+  }
+
+  function bindDrag(sr) {
+    sr.addEventListener('dragstart', (e) => {
+      const source = e.target.closest('[data-id]');
+      if (!source) return;
+      const id = Number(source.dataset.id);
+      if (!id) return;
+      drag = { id, from: source.dataset.from || 'grid' };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(id));
+      source.classList.add('dragging');
+    });
+
+    sr.addEventListener('dragend', () => {
+      for (const el of sr.querySelectorAll('.dragging')) el.classList.remove('dragging');
+      clearHints();
+      drag = null;
+    });
+
+    sr.addEventListener('dragover', (e) => {
+      if (!drag) return;
+      clearHints();
+      const slot = e.target.closest('.pgrid [data-slot]');
+      if (slot) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        slot.classList.add('over');
+        return;
+      }
+      const pcard = e.target.closest('.pgrid .card');
+      if (pcard) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = pcard.getBoundingClientRect();
+        pcard.classList.add(e.clientX > rect.left + rect.width / 2 ? 'drop-r' : 'drop-l');
+        return;
+      }
+      const card = e.target.closest('.grid .card');
+      if (card) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = card.getBoundingClientRect();
+        card.classList.add(e.clientX > rect.left + rect.width / 2 ? 'drop-r' : 'drop-l');
+        return;
+      }
+      if (e.target.closest('.prio')) {
+        e.preventDefault();
+        e.target.closest('.prio').classList.add('over');
+        return;
+      }
+      if (e.target.closest('.grid')) e.preventDefault();
+    });
+
+    sr.addEventListener('drop', (e) => {
+      if (!drag) return;
+      const slot = e.target.closest('.pgrid [data-slot]');
+      const pcard = e.target.closest('.pgrid .card');
+      const card = e.target.closest('.grid .card');
+      const pgap = !slot && !pcard && e.target.closest('.prio');
+      const gap = !card && e.target.closest('.grid');
+      if (!slot && !pcard && !card && !pgap && !gap) return;
+      e.preventDefault();
+      const moving = drag;
+      drag = null;
+      clearHints();
+      if (slot) {
+        dropToPriority(moving.id, Number(slot.dataset.slot));
+      } else if (pcard) {
+        const rect = pcard.getBoundingClientRect();
+        const after = e.clientX > rect.left + rect.width / 2;
+        dropToPriority(moving.id, Number(pcard.dataset.pos) + (after ? 1 : 0));
+      } else if (pgap) {
+        dropToPriority(moving.id, prefs.priority.length);
+      } else if (card) {
+        const rect = card.getBoundingClientRect();
+        dropToGrid(moving, Number(card.dataset.id), e.clientX > rect.left + rect.width / 2);
+      } else {
+        dropToGrid(moving, 0, true);
+      }
     });
   }
 
@@ -341,13 +582,6 @@
     if (!mine.sr) return;
     for (const btn of mine.sr.querySelectorAll('[data-cols]')) {
       btn.classList.toggle('on', Number(btn.dataset.cols) === prefs.cols);
-    }
-    const sortBtn = mine.sr.querySelector('[data-act="sort"]');
-    if (sortBtn) {
-      const on = prefs.courseSort === 'az';
-      sortBtn.classList.toggle('on', on);
-      sortBtn.setAttribute('aria-pressed', String(on));
-      sortBtn.title = on ? 'Bỏ sắp xếp A–Z' : 'Sắp xếp môn học A–Z';
     }
     syncSurface();
   }
@@ -377,6 +611,7 @@
 
   function paintMine() {
     if (mine.loading) {
+      hidePriority();
       mine.grid.innerHTML = '<div class="empty"><b>Đang tải môn học…</b>Đang đọc danh sách từ Learn LHU.</div>';
       mine.count.textContent = '';
       mine.exp.hidden = true;
@@ -384,6 +619,7 @@
     }
 
     if (!mine.items.length) {
+      hidePriority();
       mine.grid.innerHTML = mine.error
         ? '<div class="empty"><b>Không tải được danh sách môn</b>Thử tải lại trang.</div>'
         : '<div class="empty"><b>Chưa có môn học</b>Hãy đăng ký môn trong Learn LHU.</div>';
@@ -392,30 +628,104 @@
       return;
     }
 
-    const az = prefs.courseSort === 'az';
-    const pinRank = new Map(prefs.coursePins.map((id, i) => [id, i]));
+    const byId = new Map(mine.items.map(c => [c.id, c]));
+    if (!mineOrder.length) mineOrder = defaultOrder();
+    mineOrder = mineOrder.filter(id => byId.has(id));
+    for (const c of mine.items) if (!mineOrder.includes(c.id)) mineOrder.push(c.id);
+    prunePriority(byId);
+
+    const priority = prefs.priority.map(id => byId.get(id)).filter(Boolean);
+    const searching = norm(mine.query).trim() !== '';
+    if (searching) hidePriority();
+    else paintPriority(priority);
+
+    const list = searching
+      ? mine.items
+      : mineOrder.map(id => byId.get(id)).filter(c => c && !prefs.priority.includes(c.id));
+    const detail = priority.length ? `${mine.items.length} môn · ${priority.length} ưu tiên` : `${mine.items.length} môn`;
+    const allPinned = !searching && !list.length;
+
+    paintList(mine, list, {
+      count: detail,
+      emptyTitle: allPinned ? 'Mọi môn đều đang ưu tiên' : 'Không tìm thấy môn',
+      emptyHint: allPinned ? 'Bỏ một môn khỏi Ưu tiên để môn đó hiện lại ở đây.' : 'Thử từ khóa ngắn hơn, không cần dấu.'
+    });
+  }
+
+  function defaultOrder() {
     const rank = new Map(recentIds.map((id, i) => [id, i]));
-    const list = mine.items.slice().sort((a, b) => {
-      const pa = pinRank.has(a.id) ? pinRank.get(a.id) : 1e9;
-      const pb = pinRank.has(b.id) ? pinRank.get(b.id) : 1e9;
-      if (pa !== pb) return pa - pb;
-      if (az) return LHU.compareCourseNames(a.name, b.name);
+    return mine.items.slice().sort((a, b) => {
       const ra = rank.has(a.id) ? rank.get(a.id) : 1e9;
       const rb = rank.has(b.id) ? rank.get(b.id) : 1e9;
       return ra !== rb ? ra - rb : a.name.localeCompare(b.name, 'vi');
-    });
+    }).map(c => c.id);
+  }
 
-    const pinned = list.filter(c => pinRank.has(c.id)).length;
-    const detail = [
-      pinned ? `${pinned} ghim` : '',
-      az ? 'A–Z' : recentIds.length ? `${recentIds.length} gần đây` : ''
-    ].filter(Boolean).join(' · ');
-
-    paintList(mine, list, {
-      count: detail ? `${list.length} môn · ${detail}` : `${list.length} môn`,
-      emptyTitle: 'Không tìm thấy môn',
-      emptyHint: 'Thử từ khóa ngắn hơn, không cần dấu.'
+  // Courses that left the enrolled list must not keep an empty priority slot.
+  function prunePriority(byId) {
+    const kept = prefs.priority.filter(id => byId.has(id));
+    if (kept.length === prefs.priority.length) return;
+    prefs.priority = kept;
+    LHU.setPrefs({ priority: kept }).then((p) => {
+      Object.assign(prefs, p);
+      paintMine();
     });
+  }
+
+  function hidePriority() {
+    if (!mine.prio) return;
+    mine.prio.hidden = true;
+    mine.pgrid.innerHTML = '';
+    mine.msg.textContent = '';
+    mine.msg.classList.remove('on');
+  }
+
+  function paintPriority(items) {
+    if (!mine.prio) return;
+    if (!items.length) {
+      hidePriority();
+      return;
+    }
+    mine.prio.hidden = false;
+    const cap = slotCap();
+    mine.prioCount.textContent = `${items.length}/${cap} ô`;
+    if (mine.addSlot) {
+      mine.addSlot.disabled = cap >= SLOTS_MAX;
+      mine.addSlot.title = cap >= SLOTS_MAX ? `Tối đa ${SLOTS_MAX} ô ưu tiên` : 'Thêm một ô ưu tiên';
+    }
+    let html = '';
+    for (let i = 0; i < items.length; i++) html += priorityCard(items[i], i);
+    for (let i = items.length; i < cap; i++) html += emptySlot(i);
+    mine.pgrid.innerHTML = html;
+  }
+
+  function priorityCard(c, index) {
+    const cat = c.category || c.short || '';
+    return `<article class="card" draggable="true" data-id="${c.id}" data-from="priority" data-pos="${index}">
+      <span class="rank" aria-hidden="true">${index + 1}</span>
+      <a class="hit" href="${esc(c.url)}" title="${esc(c.name)}" draggable="false">
+        <span class="thumb">
+          <img src="${esc(c.image || NO_COVER)}" alt="${c.image ? '' : 'Chưa có ảnh bìa'}" draggable="false" loading="lazy" decoding="async">
+        </span>
+        <span class="body">
+          <span class="nm">${esc(c.name)}</span>
+          <span class="cat">${esc(cat) || '&nbsp;'}</span>
+        </span>
+      </a>
+      <button class="rm" data-remove="${c.id}" title="Bỏ khỏi ưu tiên" aria-label="Bỏ khỏi ưu tiên: ${esc(c.name)}">${I.close}</button>
+    </article>`;
+  }
+
+  function emptySlot(index) {
+    return `<article class="card slot-empty" data-slot="${index}" aria-label="Ô ưu tiên ${index + 1}, đang trống">
+      <span class="hit">
+        <span class="thumb ph"><span class="plus">+</span></span>
+        <span class="body">
+          <span class="nm">Ô ${index + 1}</span>
+          <span class="cat">Kéo môn vào đây</span>
+        </span>
+      </span>
+    </article>`;
   }
 
   function paintDisc() {
@@ -481,14 +791,12 @@
     return tokens.every(t => hay.includes(t));
   }
 
-  function cardHtml(c, allowPin, recent) {
+  function cardHtml(c, mineCard, recent) {
     const cat = c.category || c.short || '';
-    const pinned = allowPin && prefs.coursePins.includes(c.id);
-    const pinTitle = pinned ? 'Bỏ ghim môn học' : 'Ghim môn học lên đầu';
-    return `<article class="card${pinned ? ' pinned' : ''}">
-      <a class="hit" href="${esc(c.url)}" title="${esc(c.name)}">
+    return `<article class="card"${mineCard ? ` draggable="true" data-id="${c.id}" data-from="grid"` : ''}>
+      <a class="hit" href="${esc(c.url)}" title="${esc(c.name)}"${mineCard ? ' draggable="false"' : ''}>
         <span class="thumb">
-          <img src="${esc(c.image || NO_COVER)}" alt="${c.image ? '' : 'Chưa có ảnh bìa'}" loading="lazy" decoding="async">
+          <img src="${esc(c.image || NO_COVER)}" alt="${c.image ? '' : 'Chưa có ảnh bìa'}" draggable="false" loading="lazy" decoding="async">
           ${recent ? '<span class="rec">Gần đây</span>' : ''}
         </span>
         <span class="body">
@@ -496,7 +804,7 @@
           <span class="cat">${esc(cat) || '&nbsp;'}</span>
         </span>
       </a>
-      ${allowPin ? `<button class="pin${pinned ? ' on' : ''}" data-pin="${c.id}" aria-pressed="${pinned}" title="${pinTitle}" aria-label="${pinTitle}: ${esc(c.name)}">${I.pin}</button>` : ''}
+      ${mineCard && !prefs.priority.includes(c.id) ? `<button class="addprio" data-add="${c.id}" title="Ưu tiên môn này" aria-label="Ưu tiên môn này: ${esc(c.name)}">${I.star}</button>` : ''}
     </article>`;
   }
 

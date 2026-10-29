@@ -9,22 +9,23 @@
   const FS_STEPS = [0.9, 1, 1.15, 1.3];
   const COL_STEPS = [2, 3, 4, 5];
   const OVERDUE_DAYS = [7, 14, 30, 90];
+  const PRIORITY_SLOTS_MAX = 20;
   const DEFAULT = {
     theme: 'light', fs: 1, pinned: false, cols: 4, overdueDays: 14,
-    courseSort: 'off', autoExtend: true, coursePins: []
+    courseSort: 'off', autoExtend: true, priority: [], prioritySlots: 5
   };
 
   const hasStore = () => !!(globalThis.chrome?.storage?.local);
   let cached = null;
 
-  function cleanPins(value) {
+  function cleanPriority(value) {
     if (!Array.isArray(value)) return [];
     const out = [];
     for (const raw of value) {
       const id = Number(raw);
       if (!Number.isInteger(id) || id <= 0 || out.includes(id)) continue;
       out.push(id);
-      if (out.length >= 100) break;
+      if (out.length >= PRIORITY_SLOTS_MAX) break;
     }
     return out;
   }
@@ -38,7 +39,15 @@
     p.courseSort = p.courseSort === 'az' ? 'az' : 'off';
     p.pinned = !!p.pinned;
     p.autoExtend = p.autoExtend !== false;
-    p.coursePins = cleanPins(p.coursePins);
+    // Older builds stored pinned courses in coursePins; keep the first 5.
+    const legacy = raw && raw.priority === undefined ? raw.coursePins : undefined;
+    p.priority = cleanPriority(legacy !== undefined ? legacy : p.priority);
+    delete p.coursePins;
+    const slots = Math.round(Number(p.prioritySlots));
+    p.prioritySlots = Math.min(
+      PRIORITY_SLOTS_MAX,
+      Math.max(slots >= 1 ? slots : 5, p.priority.length)
+    );
     return p;
   }
 
@@ -1034,6 +1043,7 @@
     moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.4 14.4A8.6 8.6 0 0 1 9.6 3.6a8.8 8.8 0 1 0 10.8 10.8z"/></svg>`,
     refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.4 5.7"/><path d="M20 4v7h-7"/></svg>`,
     pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v4.5"/><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg>`,
+    star: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.7l2.6 5.2 5.8.9-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.2-4.1 5.8-.9z"/></svg>`,
     deadline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.6"/><path d="M8 3v4M16 3v4M3.5 10h17"/><path d="M8.6 14.7l2.2 2.2 4.5-4.5"/></svg>`,
     clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></svg>`,
     close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
@@ -1061,7 +1071,7 @@
   }
 
   Object.assign(LHU, {
-    PREFS_KEY, THEME_MIRROR_KEY, FS_STEPS, COL_STEPS, OVERDUE_DAYS,
+    PREFS_KEY, THEME_MIRROR_KEY, FS_STEPS, COL_STEPS, OVERDUE_DAYS, PRIORITY_SLOTS_MAX,
     getPrefs, setPrefs, applyPrefs, onPrefs, bindPrefs, readThemeMirror,
     esc, norm, mountShadow,
     compareCourseNames, THEME_CSS, PAGE_CSS, ICONS, gridIcon
